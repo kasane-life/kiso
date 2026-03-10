@@ -1,13 +1,13 @@
 # health-engine
 
-Open-source health intelligence engine. Scores your body composition, recovery, and biomarkers against population data. Tells you where you stand, what's missing, and what to do next.
+Open-source health intelligence engine. Tracks 40+ biomarkers across 20 scored dimensions, benchmarked against real CDC population data. Tells you where you stand, what's missing, and what to do next.
 
 ## What It Does Today
 
 **Body recomposition + recovery tracking.** This is built for people actively managing their body — cutting weight, building strength, dialing in nutrition — who want data-driven feedback on whether it's working and whether the cost is sustainable.
 
 Specifically:
-- **Scoring** — 20 health metrics scored against NHANES population percentiles (real CDC survey data, not arbitrary ranges). You get a percentile and a standing for every metric you feed it.
+- **Scoring** — 40+ biomarkers across 20 scored dimensions, benchmarked against NHANES population percentiles (real CDC survey data, not arbitrary ranges). You get a percentile and a standing for every dimension you feed it.
 - **Lab import** — feed it your blood work (lipids, metabolic panel, CBC, thyroid, inflammatory markers, Lp(a)) and it slots every value into population context. 18 lab markers supported today.
 - **Insights** — rule-based coaching signals from wearable data: HRV dropping? Sleep debt accumulating? Deficit too aggressive for your recovery? It flags compound effects, not just thresholds.
 - **Garmin integration** — pulls RHR, HRV, sleep, steps, VO2 max, zone 2 minutes, workouts, and daily calorie burn from Garmin Connect.
@@ -115,7 +115,7 @@ python3 cli.py status                           # Check what data files exist
 
 ```
 engine/
-├── scoring/        # 20 metrics × NHANES percentiles → coverage + assessment + gaps
+├── scoring/        # 40+ biomarkers × 20 scored dimensions × NHANES percentiles
 ├── insights/       # Rule-based coaching (HRV, RHR, sleep, weight, BP) + configurable thresholds
 ├── integrations/   # Garmin Connect API (RHR, HRV, sleep, steps, VO2, workouts, burn)
 ├── tracking/       # Weight trends, macros (remaining-to-hit), 1RM/DOTS, habit streaks
@@ -152,7 +152,7 @@ All personal data stays in `config.yaml` (gitignored). Insight thresholds are co
 - [COVERAGE.md](docs/COVERAGE.md) — The path to 100% coverage: gear guide, lab priorities, what each metric costs
 - [ONBOARDING.md](docs/ONBOARDING.md) — Full setup walkthrough
 - [SCORING.md](docs/SCORING.md) — How the scoring engine works
-- [METRICS.md](docs/METRICS.md) — 20-metric catalog with evidence and sources
+- [METRICS.md](docs/METRICS.md) — 40+ biomarkers across 20 scored dimensions, with evidence and sources
 - [DATA_FORMATS.md](docs/DATA_FORMATS.md) — CSV/JSON schemas
 
 ## Tests

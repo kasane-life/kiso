@@ -5,17 +5,19 @@
 
 ---
 
-Been building a health scoring engine on the side for the past year. Started as a personal project during a cut. Ended up going deeper than I expected.
+Been building a health scoring engine on the side for the past year. Started as a personal project during a cut. Ended up going way deeper than I expected.
 
-The thing that got me: I have 7 blood draws over 2 years. 200 biomarkers. And when I actually scored my health picture against CDC population data, I was only 42% covered. Nobody had ever scored my sleep regularity, fasting insulin trend, or blood pressure at home. My glucose looked normal on every single draw. The trend on my insulin told a different story.
+This morning I asked it how I'm doing. It pulled my Garmin data, lab results, weight trend, and habit log, scored everything against CDC population data, and coached me forward. My RHR has dropped from 57 to 50 over 90 days. HRV trending up. Zone 2 cardio strong at 164 min/week. Cardiovascular fitness is improving even in a caloric deficit. Those are real wins.
 
-Every health product I tried tells you what your numbers are. None of them tell you what you're missing. And the gap between those two things is where the real risk lives.
+Then it told me what's dragging the picture down. Sleep. 6.5 hours average, 107 minutes of bedtime variance. That regularity number puts me around the 10th percentile. I built a 10-habit sleep checklist. The data shows almost none of them are sticking. AM sunlight has a 3-day streak. Everything else is at zero.
 
-So I built the layer I couldn't find. 20 metrics scored against real NHANES percentiles. Labs, wearables, vitals, self-report. It tells you where you stand, what's missing, and what it costs to close each gap. Turns out going from 0% to 90% costs under $300 and about an hour. Most of the highest-leverage metrics don't require a blood draw.
+That's the part most health tools skip. Not just "here are your numbers" but "here's the compound effect, here's what's not working, and here's the one thing to fix today." Recovery, habits, and biomarkers in one picture.
+
+The engine tracks 40+ biomarkers across 20 scored dimensions. Labs, wearables, vitals, self-report. All benchmarked against real NHANES population percentiles, not arbitrary app ranges. It tells you where you stand, what you're missing, and what it costs to close each gap.
 
 Today I'm open sourcing it: github.com/a-deal/health-engine
 
-The timing matters. I've been working with Paul Mederos, who's been building Kasane (kasanelife.com), a health coaching app grounded in the same belief: structured health data is what makes coaching personal, not generic advice. Our work kept converging on the same problem from different directions. Open sourcing the scoring layer felt right. This should be shared infrastructure, not locked inside one product.
+The timing matters. I've been working with Paul Mederos, who's building Kasane (kasanelife.com), a health coaching app grounded in the same belief: structured health data is what makes coaching personal, not generic advice. Our work kept converging on the same problem from different directions. Open sourcing the scoring layer felt right. This should be shared infrastructure, not locked inside one product.
 
 The repo works out of the box with Claude Code. Clone it, point it at your data, say "how am I doing?" and it coaches you from your actual numbers. No dashboard to check. You just talk to it.
 
@@ -25,7 +27,9 @@ If you're building in health, or just want a clear read on where you stand, it's
 
 ## Notes
 
-- Links to README "Why This Exists" section (same language: "what you're missing", coverage score, NHANES)
+- Hook: sleep/recovery/habits story from this morning's actual check-in (not the insulin story)
+- "40+ biomarkers across 20 scored dimensions" matches README language exactly
+- Links to README "Why This Exists" section (same framing: what you're missing, coverage score, NHANES)
 - Paul/Kasane mention is genuine, not promotional. Names the convergence.
 - CTA is soft. "It's yours."
 - Reads naturally after the Feb 27 Paul reply (ecosystem framing).

@@ -10,7 +10,7 @@ Average is not healthy. The engine doesn't grade on a curve — it shows you whe
 
 ## The Coverage Score
 
-The engine tracks 20 health metrics across blood panels, wearable data, vital signs, and self-report. Your **coverage score** tells you what percentage of the picture you've filled in. The **gap analysis** tells you exactly what's missing, ranked by how much each gap costs to close.
+The engine tracks 40+ biomarkers across 20 scored dimensions spanning blood panels, wearable data, vital signs, and self-report. Your **coverage score** tells you what percentage of the picture you've filled in. The **gap analysis** tells you exactly what's missing, ranked by how much each gap costs to close.
 
 You don't need everything on day one. Start with what you have.
 
