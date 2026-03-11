@@ -1,6 +1,8 @@
 # Health Engine
 
-Open-source health scoring engine that runs locally with Claude. 20 clinically validated metrics, NHANES population percentiles, wearable integration. Your data never leaves your machine.
+Open-source health scoring engine that runs locally with Claude. 20 clinically validated metrics, NHANES population percentiles, wearable integration, visual dashboard. Your data never leaves your machine.
+
+**Score → Body → Actions.** Check in, see where you stand, know what to do next. Repeat.
 
 ## Get Started (2 minutes)
 
@@ -50,14 +52,29 @@ Add to Claude config:
 
 You talk to Claude. It knows your health data.
 
-- **"How am I doing?"** — Full coaching read from your actual numbers, trends, and compound patterns
+- **"How am I doing?"** — Full coaching read: scores, trends, compound patterns, one actionable nudge
+- **"Show me the dashboard"** — Visual snapshot: coverage ring, clinical zones, wearable trends, gap analysis
 - **"Set me up"** — Guided walkthrough of all 20 health dimensions, what's tracked vs missing, ranked next steps
 - **"I weighed 192 this morning"** — Logged. Trend updated. No forms.
 - **"What should I measure next?"** — Gap analysis ranked by leverage and cost
 
 Every conversation picks up where the last one left off. Same scores, same trends, same progress.
 
+## Dashboard
+
+Open the dashboard from any Claude conversation: **"show me the dashboard"**
+
+Three sections, progressive reveal:
+
+1. **Your Score** — Coverage ring, assessment percentile, compound coaching read
+2. **Your Body** — Recovery trends (RHR, HRV, sleep), body composition, movement, nutrition, habits
+3. **Your Actions** — Next 3 moves ranked by impact, coaching insights, compound pattern alerts
+
+The dashboard shows the complete 20-metric picture — measured metrics with clinical zones and trends, unmeasured metrics with cost-to-close. It reads `briefing.json` locally. No server required.
+
 ## Scoring
+
+Five pillars:
 
 **Clinical zones** (Optimal / Healthy / Borderline / Elevated) from AHA, ADA, and ESC guidelines — the same thresholds your cardiologist uses.
 
@@ -97,6 +114,27 @@ python3 cli.py import apple-health /path/to/export.zip
 
 Parses RHR, HRV (SDNN), steps, VO2 max, and sleep via SAX streaming. Handles large exports.
 
+## MCP Tools
+
+When connected to Claude, 14 tools are available:
+
+| Tool | What it does |
+|------|-------------|
+| `checkin` | Full coaching briefing — scores, insights, weight, nutrition, habits, wearable data |
+| `score` | Deep-dive: coverage %, NHANES percentiles for 20 metrics, tier breakdown, gap analysis |
+| `onboard` | 20-metric coverage map, wearable connection status, ranked next steps |
+| `get_protocols` | Active protocol progress — day, week, phase, habits, nudges |
+| `log_weight` | Log a weight measurement |
+| `log_bp` | Log blood pressure |
+| `log_habits` | Log daily habits |
+| `log_meal` | Log a meal with macros |
+| `connect_garmin` | Check Garmin connection status |
+| `open_dashboard` | Open the visual health dashboard in a browser |
+| `setup_profile` | Create or update user profile |
+| `get_status` | Data files inventory — what exists, last modified, row counts |
+
+Plus a methodology resource (`health-engine://methodology`) that explains every scoring decision in plain language.
+
 ## CLI
 
 ```bash
@@ -121,23 +159,6 @@ output = score_profile(profile)
 print(f"Coverage: {output['coverage_score']}%")
 ```
 
-## MCP Tools
-
-When connected to Claude, these tools are available:
-
-| Tool | What it does |
-|------|-------------|
-| `checkin` | Full coaching briefing — scores, insights, weight, nutrition, habits, wearable data |
-| `score` | Deep-dive: coverage %, NHANES percentiles for 20 metrics, tier breakdown, gap analysis |
-| `onboard` | 20-metric coverage map, wearable connection status, ranked next steps |
-| `log_weight` | Log a weight measurement |
-| `log_bp` | Log blood pressure |
-| `log_habits` | Log daily habits |
-| `log_meal` | Log a meal with macros |
-| `connect_garmin` | Check Garmin connection status |
-| `open_dashboard` | Open the visual health dashboard in a browser |
-| `setup_profile` | Create or update user profile |
-
 ## Tests
 
 ```bash
@@ -149,13 +170,14 @@ python3 -m pytest tests/ -v   # 121 tests
 ```
 engine/
 ├── scoring/           # 20 metrics × NHANES percentiles × clinical zones
-├── insights/          # Rule-based coaching + compound signal detection
+├── insights/          # Rule-based coaching + compound pattern detection
 ├── coaching/          # Briefing builder, protocol engine
 ├── integrations/      # Garmin Connect API, Apple Health XML parser
 ├── tracking/          # Weight, nutrition, strength, habits
 └── data/              # NHANES percentile tables, methodology (ships with package)
 
-mcp_server/            # MCP server (FastMCP) — tools + methodology resource
+mcp_server/            # MCP server (FastMCP) — 14 tools + methodology resource
+dashboard/             # Visual health dashboard (single-file HTML, reads briefing.json)
 ```
 
 ## Docs
