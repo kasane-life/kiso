@@ -85,7 +85,7 @@ class GarminClient:
         password = getpass.getpass("Garmin Connect password: ")
 
         print("Logging in to Garmin Connect...")
-        client = Garmin(email, password)
+        client = Garmin(email, password, prompt_mfa=input)
         client.login()
         td.mkdir(parents=True, exist_ok=True)
         client.garth.dump(str(td))

@@ -69,6 +69,33 @@ def _load_json_file(path: Path) -> dict | None:
         return json.load(f)
 
 
+# Wearable attributes shared across scoring, checkin, onboard
+_WEARABLE_ATTRS = (
+    "resting_hr", "daily_steps_avg", "sleep_regularity_stddev",
+    "sleep_duration_avg", "vo2_max", "hrv_rmssd_avg", "zone2_min_per_week",
+)
+
+
+def _load_wearable_data(data_dir: Path) -> dict | None:
+    """Load wearable data with priority fallback: garmin > oura > whoop > apple_health.
+
+    Returns the merged dict from the highest-priority source that exists,
+    or None if no wearable data found.
+    """
+    # Priority order: Garmin first, then future wearables, Apple Health last
+    sources = [
+        "garmin_latest.json",
+        "oura_latest.json",
+        "whoop_latest.json",
+        "apple_health_latest.json",
+    ]
+    for source in sources:
+        data = _load_json_file(data_dir / source)
+        if data is not None:
+            return data
+    return None
+
+
 def register_tools(mcp: FastMCP):
     """Register all Health Engine tools on the given MCP server."""
 
@@ -106,15 +133,11 @@ def register_tools(mcp: FastMCP):
         if profile_cfg.get("phq9_score") is not None:
             profile.phq9_score = profile_cfg["phq9_score"]
 
-        # Load wearable data into profile (Garmin preferred, Apple Health fallback)
+        # Load wearable data into profile (priority: garmin > oura > whoop > apple_health)
         data_dir = _data_dir(user_id)
-        wearable_attrs = ("resting_hr", "daily_steps_avg", "sleep_regularity_stddev",
-                          "sleep_duration_avg", "vo2_max", "hrv_rmssd_avg", "zone2_min_per_week")
-        wearable_data = _load_json_file(data_dir / "garmin_latest.json")
-        if wearable_data is None:
-            wearable_data = _load_json_file(data_dir / "apple_health_latest.json")
+        wearable_data = _load_wearable_data(data_dir)
         if wearable_data:
-            for attr in wearable_attrs:
+            for attr in _WEARABLE_ATTRS:
                 val = wearable_data.get(attr)
                 if val is not None:
                     setattr(profile, attr, val)
@@ -477,14 +500,11 @@ def register_tools(mcp: FastMCP):
         if profile_cfg.get("phq9_score") is not None:
             profile.phq9_score = profile_cfg["phq9_score"]
 
-        # Load wearable data (Garmin preferred, Apple Health fallback)
+        # Load wearable data (priority: garmin > oura > whoop > apple_health)
         garmin_path = data_dir / "garmin_latest.json"
-        wearable_data = _load_json_file(garmin_path)
-        if wearable_data is None:
-            wearable_data = _load_json_file(data_dir / "apple_health_latest.json")
+        wearable_data = _load_wearable_data(data_dir)
         if wearable_data:
-            for attr in ("resting_hr", "daily_steps_avg", "sleep_regularity_stddev",
-                         "sleep_duration_avg", "vo2_max", "hrv_rmssd_avg", "zone2_min_per_week"):
+            for attr in _WEARABLE_ATTRS:
                 val = wearable_data.get(attr)
                 if val is not None:
                     setattr(profile, attr, val)
@@ -707,6 +727,60 @@ def register_tools(mcp: FastMCP):
             "has_data": has_data,
             "last_updated": freshness,
             "hint": hint,
+        }
+
+    @mcp.tool()
+    def connect_wearable(service: str, user_id: str = "default") -> dict:
+        """Get a tappable auth link for connecting a wearable device.
+        The user opens this link on their phone to sign in.
+        Currently supports: garmin. Future: oura, whoop.
+
+        Args:
+            service: Wearable service name (garmin, oura, whoop)
+            user_id: User identifier for multi-user support
+        """
+        supported = ["garmin"]
+        if service not in supported:
+            return {
+                "error": f"Unsupported service: {service}. Supported: {', '.join(supported)}",
+            }
+
+        from engine.gateway.config import load_gateway_config
+        gw_config = load_gateway_config()
+
+        if not gw_config.tunnel_domain and gw_config.port == 18800:
+            # Generate URL even without tunnel (localhost works for local testing)
+            pass
+
+        from engine.gateway.token_store import TokenStore
+        ts = TokenStore()
+
+        # Check if already connected
+        if ts.has_token(service, user_id):
+            data_dir = _data_dir(user_id)
+            has_data = _load_wearable_data(data_dir) is not None
+            if has_data:
+                return {
+                    "already_connected": True,
+                    "service": service,
+                    "user_id": user_id,
+                    "hint": f"{service.title()} is already connected. Use pull_{service} to refresh data.",
+                }
+
+        # Generate signed auth URL
+        import hashlib, hmac, time as _time, secrets
+        secret = gw_config.hmac_secret or secrets.token_hex(32)
+        bucket = str(int(_time.time()) // 3600)
+        payload = f"{user_id}:{service}:{bucket}"
+        sig = hmac.new(secret.encode(), payload.encode(), hashlib.sha256).hexdigest()[:16]
+        state = f"{payload}:{sig}"
+        auth_url = f"{gw_config.base_url}/auth/{service}?user={user_id}&state={state}"
+
+        return {
+            "auth_url": auth_url,
+            "service": service,
+            "user_id": user_id,
+            "instructions": f"Send this link to the user. They tap it, sign in to {service.title()}, and tokens are cached automatically.",
         }
 
     @mcp.tool()

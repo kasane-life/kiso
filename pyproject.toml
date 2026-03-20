@@ -24,6 +24,7 @@ dependencies = [
 
 [project.optional-dependencies]
 garmin = ["garminconnect>=0.2.0"]
+gateway = ["fastapi>=0.115", "uvicorn>=0.32"]
 dev = ["pytest>=7.0"]
 
 [project.scripts]

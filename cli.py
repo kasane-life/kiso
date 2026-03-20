@@ -214,6 +214,17 @@ def cmd_checkin(args):
     _render_checkin(briefing, config)
 
 
+def cmd_gateway(args):
+    """Start the auth gateway server."""
+    from engine.gateway.config import load_gateway_config
+    from engine.gateway.server import run_gateway
+
+    config = load_gateway_config()
+    if args.port:
+        config.port = args.port
+    run_gateway(config)
+
+
 def cmd_status(args):
     """Show current data status."""
     config = load_config(args.config)
@@ -293,6 +304,12 @@ def main():
     p_pull.add_argument("--workouts", action="store_true", help="Pull workouts")
     p_pull.add_argument("--workout-days", type=int, default=7)
     p_pull.set_defaults(func=cmd_pull)
+
+    # gateway
+    p_gateway = sub.add_parser("gateway", help="Start the auth gateway server")
+    p_gateway.add_argument("action", choices=["start"], help="Gateway action")
+    p_gateway.add_argument("--port", type=int, help="Override port (default: 18800)")
+    p_gateway.set_defaults(func=cmd_gateway)
 
     # status
     p_status = sub.add_parser("status", help="Show data status")
