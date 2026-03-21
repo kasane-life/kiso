@@ -16,6 +16,7 @@ import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Optional
 
 
 KNOWN_USERS = [
@@ -26,7 +27,7 @@ KNOWN_USERS = [
 ]
 
 
-def read_json(path: Path) -> dict | None:
+def read_json(path: Path) -> Optional[dict]:
     """Read a JSON file, return None if missing or invalid."""
     try:
         with open(path) as f:
@@ -35,7 +36,7 @@ def read_json(path: Path) -> dict | None:
         return None
 
 
-def file_age_hours(path: Path) -> float | None:
+def file_age_hours(path: Path) -> Optional[float]:
     """Return hours since file was last modified, or None if missing."""
     try:
         mtime = os.path.getmtime(path)
