@@ -1228,6 +1228,198 @@ def register_tools(mcp: FastMCP):
             "data_available": has_data,
         }
 
+    # ------------------------------------------------------------------
+    # Lab data import
+    # ------------------------------------------------------------------
+
+    # Alias map: common lab report names → canonical keys
+    _LAB_ALIASES: dict[str, str] = {
+        # Lipids
+        "apo b": "apob", "apolipoprotein b": "apob", "apolipoprotein-b": "apob",
+        "ldl": "ldl_c", "ldl cholesterol": "ldl_c", "ldl-c": "ldl_c",
+        "hdl": "hdl_c", "hdl cholesterol": "hdl_c", "hdl-c": "hdl_c",
+        "total cholesterol": "total_cholesterol", "cholesterol": "total_cholesterol",
+        "triglycerides": "triglycerides", "trigs": "triglycerides", "trig": "triglycerides",
+        # Metabolic
+        "glucose": "fasting_glucose", "fasting glucose": "fasting_glucose",
+        "a1c": "hba1c", "hemoglobin a1c": "hba1c", "hba1c": "hba1c", "hgba1c": "hba1c",
+        "insulin": "fasting_insulin", "fasting insulin": "fasting_insulin",
+        # Inflammation
+        "hs-crp": "hscrp", "hscrp": "hscrp", "c-reactive protein": "hscrp",
+        "high sensitivity crp": "hscrp", "high-sensitivity crp": "hscrp",
+        "crp": "hscrp",
+        # Liver
+        "alt": "alt", "sgpt": "alt", "alanine aminotransferase": "alt",
+        "ast": "ast", "sgot": "ast", "aspartate aminotransferase": "ast",
+        "ggt": "ggt", "gamma-glutamyl transferase": "ggt",
+        # Thyroid
+        "tsh": "tsh", "thyroid stimulating hormone": "tsh",
+        "free t4": "t4_free", "t4 free": "t4_free", "ft4": "t4_free",
+        "free t3": "t3_free", "t3 free": "t3_free", "ft3": "t3_free",
+        # Vitamins & minerals
+        "vitamin d": "vitamin_d", "25-oh vitamin d": "vitamin_d", "25-hydroxy vitamin d": "vitamin_d",
+        "ferritin": "ferritin",
+        "iron saturation": "iron_saturation_pct", "iron sat": "iron_saturation_pct",
+        # CBC
+        "hemoglobin": "hemoglobin", "hgb": "hemoglobin", "hb": "hemoglobin",
+        "wbc": "wbc", "white blood cells": "wbc", "white blood cell count": "wbc",
+        "platelets": "platelets", "plt": "platelets", "platelet count": "platelets",
+        # Hormones
+        "testosterone": "testosterone_total", "total testosterone": "testosterone_total",
+        "testosterone total": "testosterone_total",
+        "free testosterone": "testosterone_free", "testosterone free": "testosterone_free",
+        "shbg": "shbg", "sex hormone binding globulin": "shbg",
+        "fsh": "fsh", "follicle stimulating hormone": "fsh",
+        "lh": "lh", "luteinizing hormone": "lh",
+        "estradiol": "estradiol", "e2": "estradiol",
+        "cortisol": "cortisol",
+        "dhea-s": "dhea_s", "dhea sulfate": "dhea_s", "dheas": "dhea_s",
+        "prolactin": "prolactin",
+        "leptin": "leptin",
+        # Other
+        "lp(a)": "lpa", "lipoprotein a": "lpa", "lipoprotein(a)": "lpa", "lpa": "lpa",
+        "homocysteine": "homocysteine",
+        "omega-3 index": "omega3_index", "omega3 index": "omega3_index",
+        "psa": "psa",
+        "uric acid": "uric_acid",
+        "bun": "bun", "blood urea nitrogen": "bun",
+        "mma": "mma", "methylmalonic acid": "mma",
+    }
+
+    # Sanity ranges: (min, max) — values outside trigger a warning but still store
+    _LAB_RANGES: dict[str, tuple[float, float]] = {
+        "ldl_c": (10, 500), "hdl_c": (5, 200), "total_cholesterol": (50, 600),
+        "triglycerides": (10, 2000), "apob": (10, 400),
+        "fasting_glucose": (20, 600), "hba1c": (2.0, 20.0), "fasting_insulin": (0.1, 300),
+        "hscrp": (0.01, 200), "alt": (1, 2000), "ast": (1, 2000), "ggt": (1, 2000),
+        "tsh": (0.01, 100), "vitamin_d": (1, 200), "ferritin": (1, 5000),
+        "hemoglobin": (3, 25), "wbc": (0.5, 50), "platelets": (10, 1000),
+        "lpa": (0, 500), "testosterone_total": (10, 2000), "testosterone_free": (0.1, 500),
+        "shbg": (1, 300), "fsh": (0.1, 200), "lh": (0.1, 100),
+        "estradiol": (1, 500), "cortisol": (0.1, 80), "dhea_s": (10, 1500),
+        "homocysteine": (1, 100), "omega3_index": (0.5, 20), "psa": (0, 100),
+        "uric_acid": (0.5, 20), "bun": (1, 150), "t4_free": (0.1, 10),
+        "t3_free": (0.5, 15), "prolactin": (0.1, 500), "leptin": (0.1, 200),
+        "mma": (10, 5000), "iron_saturation_pct": (1, 100),
+    }
+
+    # Fields that feed into UserProfile scoring
+    _SCORED_FIELDS = {
+        "ldl_c", "hdl_c", "total_cholesterol", "triglycerides", "apob",
+        "fasting_glucose", "hba1c", "fasting_insulin", "hscrp",
+        "alt", "ast", "ggt", "tsh", "vitamin_d", "ferritin",
+        "hemoglobin", "wbc", "platelets", "lpa",
+    }
+
+    def _normalize_lab_key(name: str) -> str:
+        """Normalize a biomarker name to its canonical key."""
+        lower = name.strip().lower()
+        if lower in _LAB_ALIASES:
+            return _LAB_ALIASES[lower]
+        # Try as-is with underscores
+        underscored = lower.replace(" ", "_").replace("-", "_")
+        return underscored
+
+    @mcp.tool()
+    def log_labs(
+        results: dict,
+        date: str | None = None,
+        source: str | None = None,
+        user_id: str | None = None,
+    ) -> dict:
+        """Log lab results (biomarker key-value pairs) from any provider. Names are normalized automatically — 'Apo B', 'apolipoprotein b', and 'apob' all work. Date defaults to today. Source is optional (e.g. 'Quest', 'Function Health', 'LabCorp')."""
+        date = date or datetime.now().strftime("%Y-%m-%d")
+        source = source or "unknown"
+        data_dir = _data_dir(user_id)
+        lab_path = data_dir / "lab_results.json"
+
+        # Normalize keys and validate ranges
+        normalized = {}
+        warnings = []
+        for raw_name, value in results.items():
+            key = _normalize_lab_key(raw_name)
+            try:
+                val = float(value)
+            except (ValueError, TypeError):
+                warnings.append(f"Skipped '{raw_name}': could not parse '{value}' as a number")
+                continue
+            # Range check
+            if key in _LAB_RANGES:
+                lo, hi = _LAB_RANGES[key]
+                if val < lo or val > hi:
+                    warnings.append(
+                        f"'{raw_name}' ({key}) = {val} is outside expected range [{lo}, {hi}]. "
+                        "Stored anyway — confirm with user if this is correct."
+                    )
+            normalized[key] = val
+
+        if not normalized:
+            return {"logged": False, "error": "No valid biomarker values to log", "warnings": warnings}
+
+        # Load or create lab_results.json
+        if lab_path.exists():
+            with open(lab_path) as f:
+                data = json.load(f)
+        else:
+            data = {"draws": [], "latest": {}}
+
+        # Append new draw
+        data["draws"].append({
+            "date": date,
+            "source": source,
+            "results": normalized,
+        })
+
+        # Sort draws by date (newest first)
+        data["draws"].sort(key=lambda d: d.get("date", ""), reverse=True)
+
+        # Rebuild latest: most recent value per biomarker across all draws
+        latest: dict[str, float] = {}
+        for draw in data["draws"]:
+            for key, val in draw.get("results", {}).items():
+                if key not in latest:
+                    latest[key] = val
+        data["latest"] = latest
+        data["last_updated"] = datetime.now().strftime("%Y-%m-%d")
+
+        with open(lab_path, "w") as f:
+            json.dump(data, f, indent=2)
+
+        # Classify which are scored vs extra
+        scored = [k for k in normalized if k in _SCORED_FIELDS]
+        extra = [k for k in normalized if k not in _SCORED_FIELDS]
+
+        return {
+            "logged": True,
+            "date": date,
+            "source": source,
+            "count": len(normalized),
+            "biomarkers": list(normalized.keys()),
+            "scored_fields": scored,
+            "extra_fields": extra,
+            "warnings": warnings,
+            "total_draws": len(data["draws"]),
+            "total_latest": len(data["latest"]),
+        }
+
+    @mcp.tool()
+    def get_labs(user_id: str | None = None) -> dict:
+        """Retrieve full lab history — all draws with dates, sources, results, and the computed latest values. Use this to check what labs are on file, compare across draws, and identify gaps."""
+        data_dir = _data_dir(user_id)
+        lab_path = data_dir / "lab_results.json"
+        if not lab_path.exists():
+            return {"has_labs": False, "draws": [], "latest": {}}
+        with open(lab_path) as f:
+            data = json.load(f)
+        return {
+            "has_labs": True,
+            "draws": data.get("draws", []),
+            "latest": data.get("latest", {}),
+            "total_draws": len(data.get("draws", [])),
+            "total_biomarkers": len(data.get("latest", {})),
+            "last_updated": data.get("last_updated", ""),
+        }
+
 
 def register_resources(mcp: FastMCP):
     """Register MCP resources (readable documents)."""
