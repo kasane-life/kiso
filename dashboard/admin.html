@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>baseline ops</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: #09090b;
+    color: #fafafa;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    line-height: 1.5;
+    padding: 24px;
+    min-height: 100vh;
+  }
+
+  .header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 24px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid #27272a;
+  }
+
+  .header h1 {
+    font-size: 16px;
+    font-weight: 400;
+    color: #71717a;
+    letter-spacing: 0.05em;
+  }
+
+  .header-meta {
+    display: flex;
+    gap: 20px;
+    color: #52525b;
+    font-size: 11px;
+  }
+
+  .header-meta span { white-space: nowrap; }
+
+  .error-banner {
+    background: #1c1007;
+    border: 1px solid #92400e;
+    color: #fbbf24;
+    padding: 16px 20px;
+    font-size: 12px;
+    margin-bottom: 24px;
+  }
+
+  .error-banner code {
+    color: #fafafa;
+    background: #27272a;
+    padding: 2px 6px;
+  }
+
+  /* System strip */
+  .system-strip {
+    display: flex;
+    gap: 24px;
+    margin-bottom: 20px;
+    padding: 10px 16px;
+    background: #111113;
+    border: 1px solid #27272a;
+    font-size: 11px;
+    color: #71717a;
+  }
+
+  .system-strip .stat-label {
+    font-family: 'DM Sans', sans-serif;
+    color: #52525b;
+    margin-right: 6px;
+  }
+
+  .system-strip .stat-value { color: #a1a1aa; }
+  .system-strip .stat-value.fresh { color: #22c55e; }
+  .system-strip .stat-value.stale { color: #eab308; }
+  .system-strip .stat-value.old { color: #ef4444; }
+
+  /* User table */
+  .table-wrap {
+    background: #111113;
+    border: 1px solid #27272a;
+    overflow-x: auto;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    white-space: nowrap;
+  }
+
+  thead th {
+    font-family: 'DM Sans', sans-serif;
+    font-size: 10px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #52525b;
+    text-align: left;
+    padding: 10px 14px;
+    border-bottom: 1px solid #27272a;
+    position: sticky;
+    top: 0;
+    background: #111113;
+  }
+
+  thead th.num { text-align: right; }
+
+  tbody tr { border-bottom: 1px solid #18181b; }
+  tbody tr:last-child { border-bottom: none; }
+  tbody tr:hover { background: #18181b; }
+
+  td {
+    padding: 8px 14px;
+    font-size: 13px;
+    vertical-align: middle;
+  }
+
+  td.num {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .user-cell .user-name {
+    font-weight: 500;
+    color: #fafafa;
+  }
+
+  .user-cell .user-id {
+    font-size: 10px;
+    color: #52525b;
+    margin-left: 6px;
+  }
+
+  /* Status pills */
+  .pill {
+    display: inline-block;
+    padding: 2px 8px;
+    font-size: 10px;
+    font-weight: 500;
+    border-radius: 3px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  .pill.active   { background: #052e16; color: #22c55e; }
+  .pill.quiet    { background: #1a1a00; color: #eab308; }
+  .pill.inactive { background: #1c0a0a; color: #ef4444; }
+  .pill.onboarding { background: #0c1a2e; color: #3b82f6; }
+
+  /* Garmin status */
+  .garmin-connected { color: #22c55e; }
+  .garmin-stale     { color: #eab308; }
+  .garmin-missing   { color: #52525b; }
+
+  /* Metric coloring */
+  .metric-good    { color: #22c55e; }
+  .metric-warn    { color: #eab308; }
+  .metric-bad     { color: #ef4444; }
+  .metric-neutral { color: #a1a1aa; }
+  .metric-na      { color: #3f3f46; }
+
+  .empty-state {
+    padding: 48px 20px;
+    text-align: center;
+    color: #52525b;
+    font-size: 12px;
+  }
+
+  .empty-state code {
+    display: block;
+    margin-top: 8px;
+    color: #a1a1aa;
+    background: #18181b;
+    padding: 8px 16px;
+    display: inline-block;
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>baseline ops</h1>
+  <div class="header-meta">
+    <span id="generated-at">loading...</span>
+    <span id="refresh-countdown"></span>
+  </div>
+</div>
+
+<div id="system-strip" class="system-strip" style="display:none;">
+  <div>
+    <span class="stat-label">generated</span>
+    <span class="stat-value" id="sys-generated">--</span>
+  </div>
+  <div>
+    <span class="stat-label">users</span>
+    <span class="stat-value" id="sys-users">--</span>
+  </div>
+  <div>
+    <span class="stat-label">active</span>
+    <span class="stat-value" id="sys-active">--</span>
+  </div>
+  <div>
+    <span class="stat-label">data staleness</span>
+    <span class="stat-value" id="sys-staleness">--</span>
+  </div>
+</div>
+
+<div id="content">
+  <div class="empty-state">
+    <div>loading admin data...</div>
+  </div>
+</div>
+
+<script>
+const REFRESH_INTERVAL = 60;
+let secondsUntilRefresh = REFRESH_INTERVAL;
+let refreshTimer = null;
+
+function fmt(v, decimals) {
+  if (v === null || v === undefined) return '--';
+  if (typeof decimals === 'number') return Number(v).toFixed(decimals);
+  return String(v);
+}
+
+function hrvClass(v) {
+  if (v === null || v === undefined) return 'metric-na';
+  if (v >= 60) return 'metric-good';
+  if (v >= 40) return 'metric-neutral';
+  if (v >= 25) return 'metric-warn';
+  return 'metric-bad';
+}
+
+function rhrClass(v) {
+  if (v === null || v === undefined) return 'metric-na';
+  if (v <= 55) return 'metric-good';
+  if (v <= 65) return 'metric-neutral';
+  if (v <= 75) return 'metric-warn';
+  return 'metric-bad';
+}
+
+function sleepClass(v) {
+  if (v === null || v === undefined) return 'metric-na';
+  if (v >= 7.5) return 'metric-good';
+  if (v >= 7.0) return 'metric-neutral';
+  if (v >= 6.0) return 'metric-warn';
+  return 'metric-bad';
+}
+
+function coverageClass(v) {
+  if (v === null || v === undefined) return 'metric-na';
+  if (v >= 70) return 'metric-good';
+  if (v >= 50) return 'metric-neutral';
+  if (v >= 30) return 'metric-warn';
+  return 'metric-bad';
+}
+
+function garminBadge(garmin) {
+  const s = garmin.status;
+  if (s === 'connected') return `<span class="garmin-connected">connected</span>`;
+  if (s === 'stale') {
+    const h = garmin.age_hours ? Math.round(garmin.age_hours) + 'h ago' : '';
+    return `<span class="garmin-stale">stale ${h}</span>`;
+  }
+  return `<span class="garmin-missing">--</span>`;
+}
+
+function statusPill(user) {
+  if (!user.onboarded && !user.has_briefing) {
+    return `<span class="pill onboarding">onboarding</span>`;
+  }
+  const a = user.activity;
+  return `<span class="pill ${a}">${a}</span>`;
+}
+
+function relativeTime(isoStr) {
+  if (!isoStr) return '--';
+  const d = new Date(isoStr);
+  const now = new Date();
+  const diffMs = now - d;
+  const mins = Math.floor(diffMs / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return mins + 'm ago';
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return hrs + 'h ago';
+  const days = Math.floor(hrs / 24);
+  return days + 'd ago';
+}
+
+function stalenessClass(isoStr) {
+  if (!isoStr) return 'old';
+  const mins = (new Date() - new Date(isoStr)) / 60000;
+  if (mins < 120) return 'fresh';
+  if (mins < 1440) return 'stale';
+  return 'old';
+}
+
+function renderDashboard(data) {
+  // Header
+  const genAt = relativeTime(data.generated_at);
+  document.getElementById('generated-at').textContent = 'updated ' + genAt;
+
+  // System strip
+  const strip = document.getElementById('system-strip');
+  strip.style.display = 'flex';
+  document.getElementById('sys-generated').textContent = new Date(data.generated_at).toLocaleString();
+  document.getElementById('sys-generated').className = 'stat-value ' + stalenessClass(data.generated_at);
+  document.getElementById('sys-users').textContent = data.user_count;
+  document.getElementById('sys-active').textContent = data.active_count + '/' + data.user_count;
+  document.getElementById('sys-active').className = 'stat-value ' + (data.active_count > 0 ? 'fresh' : 'old');
+
+  // Compute overall staleness
+  const ages = data.users
+    .map(u => u.garmin.age_hours)
+    .filter(a => a !== null);
+  const maxAge = ages.length > 0 ? Math.max(...ages) : null;
+  const staleTxt = maxAge !== null ? Math.round(maxAge) + 'h max' : 'no garmin data';
+  const staleEl = document.getElementById('sys-staleness');
+  staleEl.textContent = staleTxt;
+  if (maxAge === null) staleEl.className = 'stat-value old';
+  else if (maxAge < 12) staleEl.className = 'stat-value fresh';
+  else if (maxAge < 48) staleEl.className = 'stat-value stale';
+  else staleEl.className = 'stat-value old';
+
+  // User table
+  const content = document.getElementById('content');
+  let html = `<div class="table-wrap"><table>
+    <thead><tr>
+      <th>User</th>
+      <th>Status</th>
+      <th class="num">HRV</th>
+      <th class="num">RHR</th>
+      <th class="num">Sleep</th>
+      <th class="num">Weight</th>
+      <th class="num">Coverage</th>
+      <th>Garmin</th>
+    </tr></thead><tbody>`;
+
+  for (const u of data.users) {
+    const m = u.metrics;
+    html += `<tr>
+      <td class="user-cell">
+        <span class="user-name">${u.name}</span>
+        <span class="user-id">${u.user_id}</span>
+      </td>
+      <td>${statusPill(u)}</td>
+      <td class="num ${hrvClass(m.hrv)}">${fmt(m.hrv, 1)}</td>
+      <td class="num ${rhrClass(m.rhr)}">${fmt(m.rhr, 0)}</td>
+      <td class="num ${sleepClass(m.sleep_hours)}">${fmt(m.sleep_hours, 1)}</td>
+      <td class="num metric-neutral">${m.weight !== null ? fmt(m.weight, 1) : '--'}</td>
+      <td class="num ${coverageClass(m.score_coverage)}">${m.score_coverage !== null ? m.score_coverage + '%' : '--'}</td>
+      <td>${garminBadge(u.garmin)}</td>
+    </tr>`;
+  }
+
+  html += '</tbody></table></div>';
+  content.innerHTML = html;
+}
+
+function showError() {
+  document.getElementById('generated-at').textContent = 'no data';
+  document.getElementById('content').innerHTML = `
+    <div class="error-banner">
+      No admin data found. Run the aggregation script to generate it:<br><br>
+      <code>python3 scripts/admin_status.py</code>
+    </div>`;
+}
+
+async function loadData() {
+  try {
+    const resp = await fetch('../data/admin/admin_status.json?t=' + Date.now());
+    if (!resp.ok) throw new Error(resp.status);
+    const data = await resp.json();
+    renderDashboard(data);
+  } catch (e) {
+    showError();
+  }
+  secondsUntilRefresh = REFRESH_INTERVAL;
+}
+
+function updateCountdown() {
+  secondsUntilRefresh--;
+  const el = document.getElementById('refresh-countdown');
+  if (secondsUntilRefresh <= 0) {
+    el.textContent = 'refreshing...';
+    loadData();
+  } else {
+    el.textContent = secondsUntilRefresh + 's';
+  }
+}
+
+loadData();
+refreshTimer = setInterval(updateCountdown, 1000);
+</script>
+</body>
+</html>
