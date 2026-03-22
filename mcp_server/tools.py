@@ -1342,6 +1342,7 @@ def _calendar_list_events(
     time_max: str | None = None,
     max_results: int = 10,
     query: str | None = None,
+    calendar_id: str = "primary",
     user_id: str | None = None,
 ) -> dict:
     """List upcoming calendar events."""
@@ -1353,6 +1354,7 @@ def _calendar_list_events(
         time_max=time_max,
         max_results=max_results,
         query=query,
+        calendar_id=calendar_id,
     )
     return {"events": events, "count": len(events)}
 
@@ -1363,6 +1365,7 @@ def _calendar_create_event(
     end: str,
     description: str | None = None,
     location: str | None = None,
+    calendar_id: str = "primary",
     user_id: str | None = None,
 ) -> dict:
     """Create a new calendar event."""
@@ -1375,6 +1378,7 @@ def _calendar_create_event(
         end=end,
         description=description,
         location=location,
+        calendar_id=calendar_id,
     )
     return {"created": True, "event": event}
 
@@ -1384,6 +1388,7 @@ def _calendar_search_events(
     time_min: str | None = None,
     time_max: str | None = None,
     max_results: int = 10,
+    calendar_id: str = "primary",
     user_id: str | None = None,
 ) -> dict:
     """Search calendar events by text query."""
@@ -1395,6 +1400,7 @@ def _calendar_search_events(
         time_min=time_min,
         time_max=time_max,
         max_results=max_results,
+        calendar_id=calendar_id,
     )
     return {"events": events, "count": len(events)}
 
@@ -1674,10 +1680,11 @@ def register_tools(mcp: FastMCP):
         time_max: str | None = None,
         max_results: int = 10,
         query: str | None = None,
+        calendar_id: str = "primary",
         user_id: str | None = None,
     ) -> dict:
-        """List upcoming Google Calendar events. Returns events with title, start/end times, location, and description. Defaults to upcoming events from now. Use time_min/time_max (ISO 8601) to filter a date range."""
-        return _calendar_list_events(time_min, time_max, max_results, query, user_id)
+        """List upcoming Google Calendar events. Returns events with title, start/end times, location, and description. Defaults to upcoming events from now. Use time_min/time_max (ISO 8601) to filter a date range. Use calendar_id to target a specific calendar (default 'primary')."""
+        return _calendar_list_events(time_min, time_max, max_results, query, calendar_id, user_id)
 
     @mcp.tool()
     def calendar_create_event(
@@ -1686,10 +1693,11 @@ def register_tools(mcp: FastMCP):
         end: str,
         description: str | None = None,
         location: str | None = None,
+        calendar_id: str = "primary",
         user_id: str | None = None,
     ) -> dict:
-        """Create a Google Calendar event. Start/end can be ISO 8601 datetime (e.g. '2026-06-26T09:00:00') for timed events or YYYY-MM-DD for all-day events. Use for lab retests, training blocks, wind-down reminders, etc."""
-        return _calendar_create_event(summary, start, end, description, location, user_id)
+        """Create a Google Calendar event. Start/end can be ISO 8601 datetime (e.g. '2026-06-26T09:00:00') for timed events or YYYY-MM-DD for all-day events. Use calendar_id to target a specific calendar (default 'primary'). For training events, use the Health calendar."""
+        return _calendar_create_event(summary, start, end, description, location, calendar_id, user_id)
 
     @mcp.tool()
     def calendar_search_events(
@@ -1697,10 +1705,11 @@ def register_tools(mcp: FastMCP):
         time_min: str | None = None,
         time_max: str | None = None,
         max_results: int = 10,
+        calendar_id: str = "primary",
         user_id: str | None = None,
     ) -> dict:
-        """Search Google Calendar events by text. Searches event titles, descriptions, locations, and attendees. Use to find specific events like 'lab retest' or 'training'."""
-        return _calendar_search_events(query, time_min, time_max, max_results, user_id)
+        """Search Google Calendar events by text. Searches event titles, descriptions, locations, and attendees. Use to find specific events like 'lab retest' or 'training'. Use calendar_id to target a specific calendar."""
+        return _calendar_search_events(query, time_min, time_max, max_results, calendar_id, user_id)
 
 
 def register_resources(mcp: FastMCP):
