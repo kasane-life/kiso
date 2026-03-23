@@ -23,28 +23,21 @@ fi
 
 mkdir -p "$SHORTCUTS_DIR" "$UNSIGNED_DIR"
 
-# Read the API token from gateway.yaml
+# Read the API token from gateway.yaml (plain grep, no PyYAML dependency)
+GATEWAY_YAML=""
 if [ -f "$HOME/.config/health-engine/gateway.yaml" ]; then
-    API_TOKEN=$(python3 -c "
-import yaml, sys
-with open('$HOME/.config/health-engine/gateway.yaml') as f:
-    cfg = yaml.safe_load(f)
-print(cfg.get('api_token', ''))
-" 2>/dev/null || echo "")
+    GATEWAY_YAML="$HOME/.config/health-engine/gateway.yaml"
 elif [ -f "$PROJECT_DIR/gateway.yaml" ]; then
-    API_TOKEN=$(python3 -c "
-import yaml, sys
-with open('$PROJECT_DIR/gateway.yaml') as f:
-    cfg = yaml.safe_load(f)
-print(cfg.get('api_token', ''))
-" 2>/dev/null || echo "")
+    GATEWAY_YAML="$PROJECT_DIR/gateway.yaml"
 else
     echo "ERROR: No gateway.yaml found. Cannot read API token."
     exit 1
 fi
 
+API_TOKEN=$(grep '^api_token:' "$GATEWAY_YAML" | sed 's/^api_token: *//' | tr -d '"' | tr -d "'")
+
 if [ -z "$API_TOKEN" ]; then
-    echo "ERROR: api_token not found in gateway.yaml"
+    echo "ERROR: api_token not found in $GATEWAY_YAML"
     exit 1
 fi
 
@@ -60,18 +53,8 @@ else
         echo "ERROR: users.yaml not found"
         exit 1
     fi
-    # Extract unique user_ids
-    mapfile -t USER_IDS < <(python3 -c "
-import yaml
-with open('$USERS_YAML') as f:
-    data = yaml.safe_load(f)
-seen = set()
-for entry in data.get('users', {}).values():
-    uid = entry.get('user_id', '')
-    if uid and uid not in seen:
-        seen.add(uid)
-        print(uid)
-")
+    # Extract unique user_ids with grep (no PyYAML needed)
+    mapfile -t USER_IDS < <(grep 'user_id:' "$USERS_YAML" | sed 's/.*user_id: *//' | tr -d '"' | tr -d "'" | sort -u)
 fi
 
 echo "Signing shortcuts for ${#USER_IDS[@]} users..."
@@ -84,15 +67,20 @@ for uid in "${USER_IDS[@]}"; do
     UNSIGNED="$UNSIGNED_DIR/$uid.shortcut"
     SIGNED_FILE="$SHORTCUTS_DIR/$uid.shortcut"
 
-    # Step 1: Generate unsigned shortcut
-    python3 -c "
+    # Step 1: Generate unsigned shortcut (uses health-engine's venv if available)
+    PYTHON="python3"
+    if [ -f "$PROJECT_DIR/.venv/bin/python3" ]; then
+        PYTHON="$PROJECT_DIR/.venv/bin/python3"
+    fi
+
+    $PYTHON -c "
 import sys
 sys.path.insert(0, '$PROJECT_DIR')
 from engine.shortcuts.generator import generate_shortcut
 data = generate_shortcut(user_id='$uid', api_token='$API_TOKEN')
 with open('$UNSIGNED', 'wb') as f:
     f.write(data)
-" 2>/dev/null
+" 2>&1
 
     if [ ! -f "$UNSIGNED" ]; then
         echo "  FAIL  $uid — could not generate unsigned shortcut"
@@ -101,7 +89,7 @@ with open('$UNSIGNED', 'wb') as f:
     fi
 
     # Step 2: Sign it
-    if shortcuts sign --mode anyone --input "$UNSIGNED" --output "$SIGNED_FILE" 2>/dev/null; then
+    if shortcuts sign --mode anyone --input "$UNSIGNED" --output "$SIGNED_FILE" 2>&1; then
         SIZE=$(wc -c < "$SIGNED_FILE" | tr -d ' ')
         echo "  OK    $uid — signed ($SIZE bytes)"
         SIGNED=$((SIGNED + 1))
