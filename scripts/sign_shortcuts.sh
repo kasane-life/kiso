@@ -54,7 +54,10 @@ else
         exit 1
     fi
     # Extract unique user_ids with grep (no PyYAML needed)
-    mapfile -t USER_IDS < <(grep 'user_id:' "$USERS_YAML" | sed 's/.*user_id: *//' | tr -d '"' | tr -d "'" | sort -u)
+    USER_IDS=()
+    while IFS= read -r uid; do
+        USER_IDS+=("$uid")
+    done < <(grep 'user_id:' "$USERS_YAML" | sed 's/.*user_id: *//' | tr -d '"' | tr -d "'" | sort -u)
 fi
 
 echo "Signing shortcuts for ${#USER_IDS[@]} users..."
