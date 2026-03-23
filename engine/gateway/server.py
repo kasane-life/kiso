@@ -181,7 +181,7 @@ def create_app(config: GatewayConfig | None = None) -> "FastAPI":
     @app.get("/setup/shortcut-url", response_class=HTMLResponse)
     async def shortcut_url_page():
         """Page with the API URL for copy-pasting into iOS Shortcuts."""
-        url = f"https://auth.mybaseline.health/api/ingest_health_snapshot?token={config.api_token}"
+        url = f"https://auth.mybaseline.health/api/ingest_health_snapshot?token={config.api_token}&resting_hr=&hrv_sdnn=&steps=&weight_lbs=&vo2_max=&blood_oxygen=&active_calories=&respiratory_rate=&sleep_start=&sleep_end="
         return f"""<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Shortcut Setup</title>
