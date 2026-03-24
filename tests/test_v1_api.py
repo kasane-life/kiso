@@ -433,3 +433,136 @@ class TestBearerAuth:
     def test_bearer_token_works(self, client):
         resp = client.get("/api/v1/persons", headers={"Authorization": f"Bearer {TOKEN}"})
         assert resp.status_code == 200
+
+
+# --- Per-user token isolation ---
+
+PAUL_TOKEN = "tok_paul"
+ANDREW_TOKEN = "tok_andrew"
+
+
+@pytest.fixture
+def multi_user_client(db_path, monkeypatch):
+    """Client with per-user tokens configured alongside the admin token."""
+    monkeypatch.setattr("engine.gateway.db._db_path", lambda: db_path)
+    import engine.gateway.v1_api as v1_mod
+
+    def patched_get_db(p=None):
+        return get_db(db_path)
+    monkeypatch.setattr(v1_mod, "get_db", patched_get_db)
+
+    config = GatewayConfig(
+        port=18899,
+        api_token=TOKEN,
+        token_persons={
+            PAUL_TOKEN: ["paul-001"],
+            ANDREW_TOKEN: ["andrew-001"],
+        },
+    )
+    app = create_app(config)
+    return TestClient(app)
+
+
+class TestPerUserTokens:
+    """Verify per-user tokens can only access their own data."""
+
+    def _seed_persons(self, client):
+        """Create two persons via admin token."""
+        client.post("/api/v1/persons", params={"token": TOKEN}, json={"id": "andrew-001", "name": "Andrew"})
+        client.post("/api/v1/persons", params={"token": TOKEN}, json={"id": "paul-001", "name": "Paul"})
+
+    def test_user_token_authenticates(self, multi_user_client):
+        self._seed_persons(multi_user_client)
+        resp = multi_user_client.get("/api/v1/persons/paul-001", params={"token": PAUL_TOKEN})
+        assert resp.status_code == 200
+        assert resp.json()["name"] == "Paul"
+
+    def test_user_token_blocked_from_other_person(self, multi_user_client):
+        self._seed_persons(multi_user_client)
+        resp = multi_user_client.get("/api/v1/persons/andrew-001", params={"token": PAUL_TOKEN})
+        assert resp.status_code == 403
+
+    def test_user_token_list_persons_filtered(self, multi_user_client):
+        self._seed_persons(multi_user_client)
+        resp = multi_user_client.get("/api/v1/persons", params={"token": PAUL_TOKEN})
+        assert resp.status_code == 200
+        persons = resp.json()
+        assert len(persons) == 1
+        assert persons[0]["id"] == "paul-001"
+
+    def test_admin_token_sees_all(self, multi_user_client):
+        self._seed_persons(multi_user_client)
+        resp = multi_user_client.get("/api/v1/persons", params={"token": TOKEN})
+        assert len(resp.json()) == 2
+
+    def test_user_token_blocked_from_other_habits(self, multi_user_client):
+        self._seed_persons(multi_user_client)
+        # Create a habit for Andrew via admin
+        multi_user_client.post(
+            "/api/v1/persons/andrew-001/habits",
+            params={"token": TOKEN},
+            json={"title": "Andrew's habit"},
+        )
+        # Paul cannot list Andrew's habits
+        resp = multi_user_client.get("/api/v1/persons/andrew-001/habits", params={"token": PAUL_TOKEN})
+        assert resp.status_code == 403
+
+    def test_user_token_sync_blocked_for_other_person(self, multi_user_client):
+        resp = multi_user_client.post(
+            "/api/v1/sync",
+            params={"token": PAUL_TOKEN},
+            json={
+                "deviceId": "pauls-phone",
+                "personId": "andrew-001",
+                "lastSyncAt": None,
+                "changes": [],
+            },
+        )
+        assert resp.status_code == 403
+
+    def test_user_token_context_blocked_for_other_person(self, multi_user_client):
+        self._seed_persons(multi_user_client)
+        resp = multi_user_client.get("/api/v1/persons/andrew-001/context", params={"token": PAUL_TOKEN})
+        assert resp.status_code == 403
+
+    def test_invalid_token_rejected(self, multi_user_client):
+        resp = multi_user_client.get("/api/v1/persons", params={"token": "bad-token"})
+        assert resp.status_code == 403
+
+
+# --- Audit logging ---
+
+class TestAuditLogging:
+    def test_sync_writes_audit_entry(self, client, tmp_path, monkeypatch):
+        """Sync endpoint writes an audit log entry."""
+        audit_path = tmp_path / "admin" / "api_audit.jsonl"
+        monkeypatch.setattr("engine.gateway.v1_api._AUDIT_LOG_PATH", str(audit_path))
+
+        client.post(
+            "/api/v1/sync",
+            params=_auth(),
+            json={
+                "deviceId": "d1",
+                "personId": "p1",
+                "lastSyncAt": None,
+                "changes": [
+                    {
+                        "entity": "person",
+                        "id": "p1",
+                        "action": "upsert",
+                        "data": {"name": "Audit Test"},
+                        "updatedAt": "2026-03-23T12:00:00+00:00",
+                    }
+                ],
+            },
+        )
+
+        assert audit_path.exists()
+        entries = [json.loads(line) for line in audit_path.read_text().strip().split("\n")]
+        assert len(entries) >= 1
+        entry = entries[0]
+        assert entry["source"] == "v1_api"
+        assert entry["endpoint"] == "/api/v1/sync"
+        assert entry["method"] == "POST"
+        assert entry["person_id"] == "p1"
+        assert entry["status"] == 200

@@ -19,11 +19,16 @@ Auth: same api_token as existing /api/ endpoints.
 """
 
 import json
+import logging
+import os
+import time
 import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
+
+logger = logging.getLogger("kiso.v1_api")
 
 from .db import (
     ENTITY_TABLES,
@@ -58,6 +63,33 @@ def _new_id() -> str:
     return str(uuid.uuid4())
 
 
+# --- Audit logging ---
+
+_AUDIT_LOG_PATH = os.path.join("data", "admin", "api_audit.jsonl")
+
+
+def _audit_v1(endpoint: str, method: str, person_id: str | None, status: int,
+              elapsed_ms: int, detail: str | None = None):
+    """Append one v1 audit entry to the shared audit log."""
+    entry = {
+        "ts": datetime.now(timezone.utc).isoformat(),
+        "source": "v1_api",
+        "endpoint": endpoint,
+        "method": method,
+        "person_id": person_id,
+        "status": status,
+        "ms": elapsed_ms,
+    }
+    if detail:
+        entry["detail"] = detail
+    try:
+        os.makedirs(os.path.dirname(_AUDIT_LOG_PATH), exist_ok=True)
+        with open(_AUDIT_LOG_PATH, "a") as f:
+            f.write(json.dumps(entry, default=str) + "\n")
+    except Exception:
+        logger.warning("Failed to write v1 audit log", exc_info=True)
+
+
 # --- Auth dependency ---
 
 def _get_config(request: Request):
@@ -65,9 +97,12 @@ def _get_config(request: Request):
 
 
 def _verify_token(request: Request, token: str = Query(None)):
-    """Verify API token from query param or Authorization header."""
+    """Verify API token from query param or Authorization header.
+
+    Accepts the main api_token or any key in token_persons.
+    """
     config = _get_config(request)
-    if not config.api_token:
+    if not config.api_token and not config.token_persons:
         raise HTTPException(500, "API token not configured")
 
     effective = token
@@ -76,9 +111,34 @@ def _verify_token(request: Request, token: str = Query(None)):
         if auth.startswith("Bearer "):
             effective = auth[7:]
 
-    if not effective or effective != config.api_token:
+    if not effective:
         raise HTTPException(403, "Invalid token")
-    return effective
+
+    # Check main admin token
+    if config.api_token and effective == config.api_token:
+        return effective
+
+    # Check per-user tokens
+    if effective in config.token_persons:
+        return effective
+
+    raise HTTPException(403, "Invalid token")
+
+
+def _check_person_access(request: Request, token: str, person_id: str):
+    """Verify the token is allowed to access this person's data.
+
+    Admin token (api_token) can access everything.
+    Per-user tokens can only access their mapped person IDs.
+    """
+    config = _get_config(request)
+    # Admin token: unrestricted
+    if config.api_token and token == config.api_token:
+        return
+    # Per-user token: check mapping
+    allowed = config.token_persons.get(token, [])
+    if person_id not in allowed:
+        raise HTTPException(403, "Access denied for this person")
 
 
 # --- Helpers ---
@@ -127,11 +187,13 @@ def _get_or_404(table: str, row_id: str, db=None) -> dict:
 # --- Sync endpoint ---
 
 @router.post("/sync")
-def sync(body: SyncRequest, _token: str = Depends(_verify_token)):
+def sync(body: SyncRequest, request: Request, _token: str = Depends(_verify_token)):
     """Bidirectional sync: client pushes changes, pulls server changes.
 
     Conflict resolution: last-write-wins by updated_at timestamp.
     """
+    _check_person_access(request, _token, body.person_id)
+    t0 = time.monotonic()
     db = get_db()
     init_db()
     now = _now_iso()
@@ -255,6 +317,9 @@ def sync(body: SyncRequest, _token: str = Depends(_verify_token)):
     )
     db.commit()
 
+    elapsed = int((time.monotonic() - t0) * 1000)
+    _audit_v1("/api/v1/sync", "POST", body.person_id, 200, elapsed,
+              f"pushed={pushed} pulled={len(server_changes)}")
     return SyncResponse(
         server_changes=server_changes,
         sync_at=now,
@@ -265,15 +330,22 @@ def sync(body: SyncRequest, _token: str = Depends(_verify_token)):
 # --- Persons CRUD ---
 
 @router.get("/persons")
-def list_persons(_token: str = Depends(_verify_token)):
+def list_persons(request: Request, _token: str = Depends(_verify_token)):
+    config = _get_config(request)
     db = get_db()
     init_db()
     rows = db.execute("SELECT * FROM person WHERE deleted_at IS NULL").fetchall()
-    return _serialize_list(rows, PersonOut)
+    results = _serialize_list(rows, PersonOut)
+    # Per-user token: filter to allowed persons only
+    allowed = config.token_persons.get(_token)
+    if allowed is not None:
+        results = [p for p in results if p["id"] in allowed]
+    return results
 
 
 @router.get("/persons/{person_id}")
-def get_person(person_id: str, _token: str = Depends(_verify_token)):
+def get_person(person_id: str, request: Request, _token: str = Depends(_verify_token)):
+    _check_person_access(request, _token, person_id)
     init_db()
     return _get_or_404("person", person_id)
 
@@ -305,7 +377,8 @@ def create_person(body: PersonCreate, _token: str = Depends(_verify_token)):
 
 
 @router.put("/persons/{person_id}")
-def update_person(person_id: str, body: PersonUpdate, _token: str = Depends(_verify_token)):
+def update_person(person_id: str, body: PersonUpdate, request: Request, _token: str = Depends(_verify_token)):
+    _check_person_access(request, _token, person_id)
     db = get_db()
     init_db()
     _get_or_404("person", person_id)  # 404 check
@@ -331,7 +404,8 @@ def update_person(person_id: str, body: PersonUpdate, _token: str = Depends(_ver
 # --- Habits CRUD ---
 
 @router.get("/persons/{person_id}/habits")
-def list_habits(person_id: str, _token: str = Depends(_verify_token)):
+def list_habits(person_id: str, request: Request, _token: str = Depends(_verify_token)):
+    _check_person_access(request, _token, person_id)
     db = get_db()
     init_db()
     rows = db.execute(
@@ -342,7 +416,8 @@ def list_habits(person_id: str, _token: str = Depends(_verify_token)):
 
 
 @router.post("/persons/{person_id}/habits", status_code=201)
-def create_habit(person_id: str, body: HabitCreate, _token: str = Depends(_verify_token)):
+def create_habit(person_id: str, body: HabitCreate, request: Request, _token: str = Depends(_verify_token)):
+    _check_person_access(request, _token, person_id)
     db = get_db()
     init_db()
     _get_or_404("person", person_id)  # verify person exists
@@ -369,10 +444,11 @@ def create_habit(person_id: str, body: HabitCreate, _token: str = Depends(_verif
 
 
 @router.put("/habits/{habit_id}")
-def update_habit(habit_id: str, body: HabitUpdate, _token: str = Depends(_verify_token)):
+def update_habit(habit_id: str, body: HabitUpdate, request: Request, _token: str = Depends(_verify_token)):
     db = get_db()
     init_db()
-    _get_or_404("habit", habit_id)
+    habit = _get_or_404("habit", habit_id)
+    _check_person_access(request, _token, habit["personId"])
     now = _now_iso()
     data = body.model_dump(exclude_none=True, by_alias=False)
     if not data:
@@ -397,11 +473,14 @@ def update_habit(habit_id: str, body: HabitUpdate, _token: str = Depends(_verify
 @router.get("/habits/{habit_id}/checkins")
 def list_checkins(
     habit_id: str,
+    request: Request,
     since: str | None = Query(None),
     _token: str = Depends(_verify_token),
 ):
     db = get_db()
     init_db()
+    habit = _get_or_404("habit", habit_id)
+    _check_person_access(request, _token, habit["personId"])
     if since:
         rows = db.execute(
             "SELECT * FROM check_in WHERE habit_id = ? AND deleted_at IS NULL AND date >= ? ORDER BY date",
@@ -416,10 +495,11 @@ def list_checkins(
 
 
 @router.post("/habits/{habit_id}/checkins", status_code=201)
-def create_checkin(habit_id: str, body: CheckInCreate, _token: str = Depends(_verify_token)):
+def create_checkin(habit_id: str, body: CheckInCreate, request: Request, _token: str = Depends(_verify_token)):
     db = get_db()
     init_db()
-    _get_or_404("habit", habit_id)
+    habit = _get_or_404("habit", habit_id)
+    _check_person_access(request, _token, habit["personId"])
     now = _now_iso()
     cid = body.id or _new_id()
     db.execute(
@@ -436,9 +516,11 @@ def create_checkin(habit_id: str, body: CheckInCreate, _token: str = Depends(_ve
 @router.get("/persons/{person_id}/focus-plans")
 def list_focus_plans(
     person_id: str,
+    request: Request,
     limit: int = Query(10),
     _token: str = Depends(_verify_token),
 ):
+    _check_person_access(request, _token, person_id)
     db = get_db()
     init_db()
     rows = db.execute(
@@ -450,7 +532,8 @@ def list_focus_plans(
 
 
 @router.post("/persons/{person_id}/focus-plans", status_code=201)
-def create_focus_plan(person_id: str, body: FocusPlanCreate, _token: str = Depends(_verify_token)):
+def create_focus_plan(person_id: str, body: FocusPlanCreate, request: Request, _token: str = Depends(_verify_token)):
+    _check_person_access(request, _token, person_id)
     db = get_db()
     init_db()
     _get_or_404("person", person_id)
@@ -479,11 +562,12 @@ def create_focus_plan(person_id: str, body: FocusPlanCreate, _token: str = Depen
 # --- Context endpoint (Milo's unified read) ---
 
 @router.get("/persons/{person_id}/context")
-def get_person_context_api(person_id: str, _token: str = Depends(_verify_token)):
+def get_person_context_api(person_id: str, request: Request, _token: str = Depends(_verify_token)):
     """Return merged context: SQLite person data + CSV health metrics.
 
     This is the primary endpoint Milo uses to get full coaching context.
     """
+    _check_person_access(request, _token, person_id)
     init_db()
     return _build_person_context(person_id)
 
@@ -542,7 +626,7 @@ def _build_person_context(person_id: str) -> dict:
     }
 
     # Merge CSV health data if health_engine_user_id is set
-    he_user_id = person.get("health_engine_user_id")
+    he_user_id = person.get("healthEngineUserId")
     if he_user_id:
         context["health"] = _load_health_context(he_user_id)
 

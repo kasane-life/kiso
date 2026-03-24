@@ -24,6 +24,10 @@ class GatewayConfig:
     api_token: str = ""
     sessions_dir: str = ""
     google_client_secrets_path: str = ""
+    # Per-token person access control. Maps token -> list of allowed person IDs.
+    # If empty, any valid token can access all persons (backward compat).
+    # Example: {"tok_paul": ["paul-person-uuid"], "tok_andrew": ["andrew-deal-001"]}
+    token_persons: dict = field(default_factory=dict)
     # Future: OAuth client credentials for Oura, Whoop
     oura: dict = field(default_factory=dict)
     whoop: dict = field(default_factory=dict)
@@ -50,6 +54,7 @@ def load_gateway_config(path: str | Path | None = None) -> GatewayConfig:
         api_token=raw.get("api_token", ""),
         sessions_dir=raw.get("sessions_dir", ""),
         google_client_secrets_path=raw.get("google_client_secrets_path", ""),
+        token_persons=raw.get("token_persons", {}),
         oura=raw.get("oura", {}),
         whoop=raw.get("whoop", {}),
     )
