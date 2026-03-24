@@ -44,6 +44,10 @@ def create_app() -> FastAPI:
     async def health_json():
         return {"status": "ok", "service": "kiso-v1", "port": PORT}
 
+    # Load gateway config (needed for auth)
+    config = load_gateway_config()
+    app.state.config = config
+
     # Register v1 routes
     register_v1_routes(app)
 
