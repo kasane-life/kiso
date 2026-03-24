@@ -76,7 +76,7 @@ Apple Health ZIP --(SAX parser)--------->  apple_health_latest.json   (same sche
 
 ## Auth
 
-- **Garmin**: OAuth via gateway at `auth.mybaseline.health`. Tokens stored at `~/.config/health-engine/tokens/garmin/<user_id>/`. Legacy CLI path: `~/.config/health-engine/garmin-tokens/`.
+- **Garmin**: OAuth via gateway at `auth.mybaseline.health`. Tokens stored at `~/.config/health-engine/tokens/garmin/<user_id>/` (legacy path, kept for backward compat). Legacy CLI path: `~/.config/health-engine/garmin-tokens/`.
 - **Apple Health**: No auth needed (manual ZIP export).
 - **Oura**: Personal Access Token (PAT). No gateway needed.
 - **Whoop**: OAuth 2.0 (would use same gateway pattern as Garmin).

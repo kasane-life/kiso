@@ -1,6 +1,6 @@
 # Methodology: Why We Score Health This Way
 
-This document explains the reasoning behind every scoring decision in the health engine. It's written for the curious user who asks "why this number?" and for the coach (Claude) who needs to explain it.
+This document explains the reasoning behind every scoring decision in Kiso. It's written for the curious user who asks "why this number?" and for the coach (Claude) who needs to explain it.
 
 ---
 

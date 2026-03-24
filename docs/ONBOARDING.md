@@ -2,7 +2,7 @@
 
 ## How It Works
 
-Health Engine is an always-on health layer, not a separate app. Once set up, it's available in every Claude conversation — Claude Desktop, Claude Code, any MCP client. Your data lives locally and persists across chats.
+Kiso is an always-on health layer, not a separate app. Once set up, it's available in every Claude conversation — Claude Desktop, Claude Code, any MCP client. Your data lives locally and persists across chats.
 
 There are two moments:
 
@@ -19,8 +19,8 @@ You don't need to re-onboard. The `onboard` tool is for first-time setup and per
 ## Step 1: Install
 
 ```bash
-git clone https://github.com/a-deal/health-engine.git
-cd health-engine
+git clone https://github.com/a-deal/kiso.git
+cd kiso
 uv sync                          # or: python3 -m pip install -e .
 uv sync --extra garmin           # optional: Garmin integration
 ```
@@ -32,10 +32,10 @@ Add to your MCP config (`~/.mcp.json` for Claude Code, or Claude Desktop setting
 ```json
 {
   "mcpServers": {
-    "health-engine": {
+    "kiso": {
       "command": "uv",
-      "args": ["run", "--directory", "/path/to/health-engine", "python3", "-m", "mcp_server.server"],
-      "cwd": "/path/to/health-engine"
+      "args": ["run", "--directory", "/path/to/kiso", "python3", "-m", "mcp_server.server"],
+      "cwd": "/path/to/kiso"
     }
   }
 }

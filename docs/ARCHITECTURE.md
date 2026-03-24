@@ -62,7 +62,7 @@ One Docker container on Mac Mini (M4 Pro):
 - FastAPI + Uvicorn on port 18800
 - Cloudflare Tunnel for HTTPS (`auth.mybaseline.health`)
 - Data volume: `data/` (CSVs + SQLite + audit logs)
-- Config: `~/.config/health-engine/gateway.yaml`
+- Config: `~/.config/health-engine/gateway.yaml` (legacy path, kept for backward compat)
 
 Agent workspace (Milo) deployed separately via `deploy-coach.sh` to `~/.openclaw/workspace/`.
 

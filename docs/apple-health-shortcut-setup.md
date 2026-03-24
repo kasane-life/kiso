@@ -221,7 +221,7 @@ You'll see a small notification banner when the automation fires each morning. T
 
 ## How it works (for the curious)
 
-The shortcut reads 9 metrics from Apple Health's HealthKit database on your phone. It packages them as a JSON object and POSTs them to the health engine gateway. The gateway:
+The shortcut reads 9 metrics from Apple Health's HealthKit database on your phone. It packages them as a JSON object and POSTs them to the Kiso gateway. The gateway:
 
 1. Validates your token
 2. Appends the snapshot to a daily time series (`apple_health_daily.json`)

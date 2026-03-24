@@ -84,19 +84,43 @@ def _verify_token(request: Request, token: str = Query(None)):
 # --- Helpers ---
 
 def _row_to_dict(row) -> dict:
-    """Convert sqlite3.Row to dict, dropping None values for cleaner JSON."""
+    """Convert sqlite3.Row to plain dict (snake_case, internal use only)."""
     if row is None:
         return {}
     return dict(row)
 
 
+# Map entity/table names to their Pydantic output models for camelCase serialization.
+_MODEL_MAP = {
+    "person": PersonOut,
+    "habit": HabitOut,
+    "check_in": CheckInOut,
+    "focus_plan": FocusPlanOut,
+}
+
+
+def _serialize(row, model_cls) -> dict:
+    """Convert sqlite3.Row to camelCase dict via Pydantic model."""
+    if row is None:
+        return {}
+    return model_cls(**dict(row)).model_dump(by_alias=True)
+
+
+def _serialize_list(rows, model_cls) -> list[dict]:
+    """Convert a list of sqlite3.Rows to camelCase dicts."""
+    return [_serialize(r, model_cls) for r in rows]
+
+
 def _get_or_404(table: str, row_id: str, db=None) -> dict:
-    """Fetch a row by id or raise 404."""
+    """Fetch a row by id or raise 404. Returns camelCase dict."""
     if db is None:
         db = get_db()
     row = db.execute(f"SELECT * FROM {table} WHERE id = ? AND deleted_at IS NULL", (row_id,)).fetchone()
     if not row:
         raise HTTPException(404, f"{table} {row_id} not found")
+    model_cls = _MODEL_MAP.get(table)
+    if model_cls:
+        return _serialize(row, model_cls)
     return _row_to_dict(row)
 
 
@@ -211,13 +235,15 @@ def sync(body: SyncRequest, _token: str = Depends(_verify_token)):
                 rows = []
 
         for row in rows:
-            d = _row_to_dict(row)
+            raw = _row_to_dict(row)
+            model_cls = _MODEL_MAP.get(entity)
+            d = _serialize(row, model_cls) if model_cls else raw
             server_changes.append({
                 "entity": entity,
-                "id": d["id"],
-                "action": "delete" if d.get("deleted_at") else "upsert",
+                "id": raw["id"],
+                "action": "delete" if raw.get("deleted_at") else "upsert",
                 "data": d,
-                "updated_at": d["updated_at"],
+                "updated_at": raw["updated_at"],
             })
 
     # Update sync cursor
@@ -243,7 +269,7 @@ def list_persons(_token: str = Depends(_verify_token)):
     db = get_db()
     init_db()
     rows = db.execute("SELECT * FROM person WHERE deleted_at IS NULL").fetchall()
-    return [_row_to_dict(r) for r in rows]
+    return _serialize_list(rows, PersonOut)
 
 
 @router.get("/persons/{person_id}")
@@ -312,7 +338,7 @@ def list_habits(person_id: str, _token: str = Depends(_verify_token)):
         "SELECT * FROM habit WHERE person_id = ? AND deleted_at IS NULL ORDER BY sort_order",
         (person_id,),
     ).fetchall()
-    return [_row_to_dict(r) for r in rows]
+    return _serialize_list(rows, HabitOut)
 
 
 @router.post("/persons/{person_id}/habits", status_code=201)
@@ -386,7 +412,7 @@ def list_checkins(
             "SELECT * FROM check_in WHERE habit_id = ? AND deleted_at IS NULL ORDER BY date",
             (habit_id,),
         ).fetchall()
-    return [_row_to_dict(r) for r in rows]
+    return _serialize_list(rows, CheckInOut)
 
 
 @router.post("/habits/{habit_id}/checkins", status_code=201)
@@ -420,7 +446,7 @@ def list_focus_plans(
         "ORDER BY created_at DESC LIMIT ?",
         (person_id, limit),
     ).fetchall()
-    return [_row_to_dict(r) for r in rows]
+    return _serialize_list(rows, FocusPlanOut)
 
 
 @router.post("/persons/{person_id}/focus-plans", status_code=201)
@@ -475,7 +501,7 @@ def _build_person_context(person_id: str) -> dict:
     ).fetchone()
     if not person_row:
         raise HTTPException(404, f"Person {person_id} not found")
-    person = _row_to_dict(person_row)
+    person = _serialize(person_row, PersonOut)
 
     # Active habits with recent check-ins (last 30 days)
     habits = []
@@ -485,13 +511,13 @@ def _build_person_context(person_id: str) -> dict:
         (person_id,),
     ).fetchall()
     for h in habit_rows:
-        hd = _row_to_dict(h)
+        hd = _serialize(h, HabitOut)
         checkins = db.execute(
             "SELECT * FROM check_in WHERE habit_id = ? AND deleted_at IS NULL "
             "AND date >= date('now', '-30 days') ORDER BY date DESC",
             (hd["id"],),
         ).fetchall()
-        hd["recent_checkins"] = [_row_to_dict(c) for c in checkins]
+        hd["recentCheckins"] = _serialize_list(checkins, CheckInOut)
         habits.append(hd)
 
     # Latest focus plan
@@ -510,9 +536,9 @@ def _build_person_context(person_id: str) -> dict:
 
     context = {
         "person": person,
-        "active_habits": habits,
-        "latest_focus_plan": _row_to_dict(fp_row) if fp_row else None,
-        "recent_messages": [_row_to_dict(m) for m in msg_rows],
+        "activeHabits": habits,
+        "latestFocusPlan": _serialize(fp_row, FocusPlanOut) if fp_row else None,
+        "recentMessages": [_row_to_dict(m) for m in msg_rows],
     }
 
     # Merge CSV health data if health_engine_user_id is set
