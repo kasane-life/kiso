@@ -3,13 +3,13 @@ requires = ["setuptools>=68.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "health-engine"
-version = "0.6.0"
-description = "Open-source health scoring engine — 20 clinically validated metrics, NHANES percentiles, wearable integration. Runs locally with Claude via MCP."
+name = "kiso"
+version = "0.7.0"
+description = "Health intelligence platform — backend for Kasane (iOS) and Milo (coaching agent). Shared data layer, 20-metric scoring engine, wearable integrations, MCP tools."
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.11"
-keywords = ["health", "mcp", "claude", "scoring", "wearables", "nhanes"]
+keywords = ["health", "mcp", "claude", "scoring", "wearables", "kasane", "coaching"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Programming Language :: Python :: 3.11",
@@ -29,11 +29,12 @@ gateway = ["fastapi>=0.115", "uvicorn>=0.32", "cryptography>=42.0"]
 dev = ["pytest>=7.0"]
 
 [project.scripts]
-health-engine = "mcp_server.server:main"
+kiso = "mcp_server.server:main"
+health-engine = "mcp_server.server:main"  # backward compat
 
 [project.urls]
-Homepage = "https://mybaseline.health/health-engine/"
-Repository = "https://github.com/a-deal/health-engine"
+Homepage = "https://kasanelife.com"
+Repository = "https://github.com/a-deal/kiso"
 
 [tool.setuptools.packages.find]
 include = ["engine*", "mcp_server*"]

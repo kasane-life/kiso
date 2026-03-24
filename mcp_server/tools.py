@@ -1948,6 +1948,103 @@ def _ingest_health_snapshot(
 
 
 # =====================================================================
+# Kasane person context (SQLite + CSV merge)
+# =====================================================================
+
+def _get_person_context(person_id: str | None = None, user_id: str | None = None) -> dict:
+    """Get unified coaching context for a person: profile, habits, check-ins from SQLite + health metrics from CSVs.
+
+    Look up by person_id (SQLite row id) or user_id (health_engine_user_id).
+    Returns merged dict with person profile, active habits, focus plan, and health data.
+    """
+    from engine.gateway.db import get_db, init_db
+    init_db()
+    db = get_db()
+
+    # Resolve person
+    if person_id:
+        row = db.execute(
+            "SELECT * FROM person WHERE id = ? AND deleted_at IS NULL", (person_id,)
+        ).fetchone()
+    elif user_id:
+        row = db.execute(
+            "SELECT * FROM person WHERE health_engine_user_id = ? AND deleted_at IS NULL", (user_id,)
+        ).fetchone()
+    else:
+        return {"error": "Provide person_id or user_id"}
+
+    if not row:
+        return {"error": "Person not found", "person_id": person_id, "user_id": user_id}
+
+    person = dict(row)
+    pid = person["id"]
+
+    # Active habits with recent check-ins
+    habits = []
+    habit_rows = db.execute(
+        "SELECT * FROM habit WHERE person_id = ? AND deleted_at IS NULL AND state = 'active' ORDER BY sort_order",
+        (pid,),
+    ).fetchall()
+    for h in habit_rows:
+        hd = dict(h)
+        checkins = db.execute(
+            "SELECT * FROM check_in WHERE habit_id = ? AND deleted_at IS NULL "
+            "AND date >= date('now', '-30 days') ORDER BY date DESC",
+            (hd["id"],),
+        ).fetchall()
+        hd["recent_checkins"] = [dict(c) for c in checkins]
+        habits.append(hd)
+
+    # Latest focus plan
+    fp = db.execute(
+        "SELECT * FROM focus_plan WHERE person_id = ? AND deleted_at IS NULL ORDER BY created_at DESC LIMIT 1",
+        (pid,),
+    ).fetchone()
+
+    context = {
+        "person": person,
+        "active_habits": habits,
+        "latest_focus_plan": dict(fp) if fp else None,
+    }
+
+    # Merge CSV health data
+    he_uid = person.get("health_engine_user_id")
+    if he_uid:
+        data_dir = _data_dir(he_uid)
+        health = {}
+
+        # Weight trend
+        weight_path = data_dir / "weight_log.csv"
+        if weight_path.exists():
+            rows = read_csv(weight_path)
+            health["weight_recent"] = rows[-14:] if rows else []
+
+        # Wearable snapshot
+        for fname in ("garmin_latest.json", "oura_latest.json", "whoop_latest.json", "apple_health_latest.json"):
+            snapshot = _load_json_file(data_dir / fname)
+            if snapshot:
+                health["wearable_snapshot"] = snapshot
+                health["wearable_source"] = fname.replace("_latest.json", "")
+                break
+
+        # Labs
+        labs = _load_json_file(data_dir / "lab_results.json")
+        if labs and "latest" in labs:
+            health["latest_labs"] = labs["latest"]
+
+        # Today's meals
+        meal_path = data_dir / "meal_log.csv"
+        if meal_path.exists():
+            today = datetime.now().strftime("%Y-%m-%d")
+            rows = read_csv(meal_path)
+            health["meals_today"] = [r for r in rows if r.get("date") == today]
+
+        context["health"] = health
+
+    return context
+
+
+# =====================================================================
 # Tool registry for HTTP API access
 # =====================================================================
 
@@ -1988,6 +2085,7 @@ TOOL_REGISTRY = {
     "pull_whoop": _pull_whoop,
     "connect_whoop": _connect_whoop,
     "ingest_health_snapshot": _ingest_health_snapshot,
+    "get_person_context": _get_person_context,
     # Excluded from HTTP: auth_garmin (interactive), auth_oura (interactive),
     # auth_whoop (interactive), open_dashboard (browser)
 }
@@ -2311,6 +2409,11 @@ def register_tools(mcp: FastMCP):
     def ingest_health_snapshot(user_id: str, metrics: dict, timestamp: str | None = None) -> dict:
         """Ingest a daily health snapshot from an iOS Shortcut (Apple Health bridge). Accepts a flat dict of metric values from HealthKit. Valid keys: resting_hr, hrv_sdnn, steps, sleep_hours, sleep_start, sleep_end, weight_lbs, vo2_max, blood_oxygen, active_calories, respiratory_rate. All metrics optional individually. Appends to daily series and updates rolling averages for scoring."""
         return _ingest_health_snapshot(user_id, metrics, timestamp)
+
+    @mcp.tool()
+    def get_person_context(person_id: str | None = None, user_id: str | None = None) -> dict:
+        """Get unified coaching context for a person: profile, habits, check-ins from Kasane + health metrics from CSVs. Look up by person_id (Kasane UUID) or user_id (health-engine user like 'default'). Returns merged dict for full coaching context."""
+        return _get_person_context(person_id, user_id)
 
 
 def register_resources(mcp: FastMCP):

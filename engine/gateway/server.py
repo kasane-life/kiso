@@ -59,6 +59,10 @@ def create_app(config: GatewayConfig | None = None) -> "FastAPI":
     # --- Health-engine tool API + transcript viewer ---
     from .api import api_handler, api_list_tools, api_async_handler, api_job_status, api_upload, api_shortcut, open_shortcut_redirect, open_automation_redirect
     from .transcripts import transcripts_api, transcripts_html
+    from .v1_api import register_v1_routes
+
+    # Kasane v1 API (must come before the {tool_name} wildcard)
+    register_v1_routes(app)
 
     # Explicit routes MUST come before the {tool_name} wildcard
     app.get("/api/tools")(api_list_tools)
