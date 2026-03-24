@@ -18,11 +18,13 @@ Kasane (iOS) ----REST----> Kiso (/api/v1/) <----MCP---- Milo (OpenClaw)
 
 Neither client knows about the other. The API is the meeting point.
 
-## What You're Building
+## Proposed Kasane Changes
 
-**SyncService.swift**: A new service in the iOS app that syncs CoreData entities to the Kiso REST API. It replaces CloudKit as the sync layer.
+To connect Kasane to Kiso, the iOS app needs a sync service that talks to the REST API. Here's how we see it phasing in:
 
-**Phase 1 (this week)**: Dual-write. CoreData + CloudKit stays. SyncService also pushes to Kiso. Compare results. Build confidence.
+**SyncService.swift**: A new service that syncs CoreData entities to `/api/v1/sync`. Replaces CloudKit as the sync layer.
+
+**Phase 1**: Dual-write. CoreData + CloudKit stays. SyncService also pushes to Kiso. Compare results, build confidence.
 
 **Phase 2**: Disable CloudKit sync. Kasane runs fully on Kiso.
 
@@ -30,7 +32,7 @@ Neither client knows about the other. The API is the meeting point.
 
 Full docs: [API.md](API.md)
 
-**Base URL**: `https://auth.mybaseline.health/api/v1` (prod), `http://localhost:18800/api/v1` (dev)
+**Base URL**: `https://auth.mybaseline.health/api/v1` (prod), `http://localhost:18800/api/v1` (dev). The domain is on Andrew's Cloudflare tunnel and may move to a Kasane-branded domain later. The API contract stays the same either way.
 
 **Auth**: `Authorization: Bearer YOUR_TOKEN` or `?token=YOUR_TOKEN`
 
