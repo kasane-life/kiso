@@ -50,6 +50,14 @@ from .v1_models import (
     SyncChange,
     SyncRequest,
     SyncResponse,
+    IosSyncRequest,
+    IosSyncResponse,
+    IosSyncChanges,
+    IosSyncPersonDTO,
+    IosSyncHabitDTO,
+    IosSyncCheckInDTO,
+    IosSyncFocusPlanDTO,
+    IosSyncMessageDTO,
 )
 
 router = APIRouter(prefix="/api/v1")
@@ -324,6 +332,142 @@ def sync(body: SyncRequest, request: Request, _token: str = Depends(_verify_toke
         server_changes=server_changes,
         sync_at=now,
         stats={"pushed": pushed, "pulled": len(server_changes)},
+    )
+
+
+# --- iOS Sync (nested format matching SyncService.swift) ---
+
+_IOS_ENTITY_MAP = {
+    "persons": ("person", lambda dto: dto.model_dump(exclude_none=True, exclude={"id"})),
+    "habits": ("habit", lambda dto: dto.model_dump(exclude_none=True, exclude={"id"})),
+    "check_ins": ("check_in", lambda dto: dto.model_dump(exclude_none=True, exclude={"id"})),
+    "focus_plans": ("focus_plan", lambda dto: dto.model_dump(exclude_none=True, exclude={"id"})),
+    "messages": ("check_in_message", lambda dto: dto.model_dump(exclude_none=True, exclude={"id"})),
+}
+
+_IOS_DTO_CLASSES = {
+    "person": IosSyncPersonDTO,
+    "habit": IosSyncHabitDTO,
+    "check_in": IosSyncCheckInDTO,
+    "focus_plan": IosSyncFocusPlanDTO,
+    "check_in_message": IosSyncMessageDTO,
+}
+
+_IOS_RESPONSE_KEYS = {
+    "person": "persons",
+    "habit": "habits",
+    "check_in": "check_ins",
+    "focus_plan": "focus_plans",
+    "check_in_message": "messages",
+}
+
+
+@router.post("/sync/ios")
+def sync_ios(body: IosSyncRequest, request: Request, _token: str = Depends(_verify_token)):
+    """iOS-compatible sync endpoint. Accepts nested SyncChanges format
+    matching the iOS SyncService.swift DTOs (snake_case JSON)."""
+    _check_person_access(request, _token, body.person_id)
+    t0 = time.monotonic()
+    db = get_db()
+    init_db()
+    now = _now_iso()
+    pushed = 0
+
+    # Push: upsert each DTO into the appropriate table
+    for field_name, (table, to_data) in _IOS_ENTITY_MAP.items():
+        dtos = getattr(body.changes, field_name, [])
+        columns = TABLE_COLUMNS.get(table, [])
+
+        for dto in dtos:
+            data = to_data(dto)
+            row_id = dto.id
+
+            # Filter to only columns that exist in the DB
+            db_data = {k: v for k, v in data.items() if k in columns}
+
+            existing = db.execute(
+                f"SELECT id FROM {table} WHERE id = ?", (row_id,)
+            ).fetchone()
+
+            if existing:
+                if db_data:
+                    sets = [f"{k} = ?" for k in db_data]
+                    sets.append("updated_at = ?")
+                    vals = list(db_data.values()) + [now, row_id]
+                    db.execute(
+                        f"UPDATE {table} SET {', '.join(sets)} WHERE id = ?",
+                        vals,
+                    )
+                    pushed += 1
+            else:
+                col_names = ["id", "created_at", "updated_at"]
+                col_vals = [row_id, db_data.pop("created_at", now), now]
+                for k, v in db_data.items():
+                    col_names.append(k)
+                    col_vals.append(v)
+                placeholders = ", ".join(["?"] * len(col_names))
+                db.execute(
+                    f"INSERT INTO {table} ({', '.join(col_names)}) VALUES ({placeholders})",
+                    col_vals,
+                )
+                pushed += 1
+
+    db.commit()
+
+    # Pull: get server changes since last_sync for this person
+    result_changes = IosSyncChanges()
+
+    for entity, table in ENTITY_TABLES.items():
+        response_key = _IOS_RESPONSE_KEYS.get(table)
+        dto_class = _IOS_DTO_CLASSES.get(table)
+        if not response_key or not dto_class:
+            continue
+
+        if body.last_sync:
+            rows = db.execute(
+                f"SELECT * FROM {table} WHERE "
+                f"(person_id = ? OR id = ?) AND updated_at > ? AND deleted_at IS NULL",
+                (body.person_id, body.person_id, body.last_sync),
+            ).fetchall()
+        else:
+            rows = db.execute(
+                f"SELECT * FROM {table} WHERE "
+                f"(person_id = ? OR id = ?) AND deleted_at IS NULL",
+                (body.person_id, body.person_id),
+            ).fetchall()
+
+        dtos = []
+        for row in rows:
+            row_dict = dict(row)
+            # Filter to fields the DTO accepts
+            dto_fields = dto_class.model_fields.keys()
+            filtered = {k: v for k, v in row_dict.items() if k in dto_fields and v is not None}
+            try:
+                dtos.append(dto_class(**filtered))
+            except Exception:
+                pass
+        setattr(result_changes, response_key, dtos)
+
+    # Update sync cursor
+    db.execute(
+        "INSERT INTO sync_cursor (device_id, person_id, last_sync_at) "
+        "VALUES (?, ?, ?) "
+        "ON CONFLICT(device_id, person_id) DO UPDATE SET last_sync_at = ?",
+        ("ios-app", body.person_id, now, now),
+    )
+    db.commit()
+
+    pulled = sum(
+        len(getattr(result_changes, k, []))
+        for k in ["persons", "habits", "check_ins", "focus_plans", "messages"]
+    )
+    elapsed = int((time.monotonic() - t0) * 1000)
+    _audit_v1("/api/v1/sync/ios", "POST", body.person_id, 200, elapsed,
+              f"pushed={pushed} pulled={pulled}")
+
+    return IosSyncResponse(
+        server_changes=result_changes,
+        sync_token=now,
     )
 
 

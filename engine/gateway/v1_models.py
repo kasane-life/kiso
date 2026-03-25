@@ -197,3 +197,107 @@ class FocusPlanOut(CamelModel):
     created_at: str
     updated_at: str
     deleted_at: str | None = None
+
+
+# --- iOS Sync Protocol (snake_case on the wire) ---
+# iOS SyncService uses JSONEncoder.keyEncodingStrategy = .convertToSnakeCase
+# so all JSON keys arrive as snake_case. Do NOT use CamelModel here.
+
+class _IosBase(BaseModel):
+    model_config = {"extra": "ignore"}
+
+
+class IosSyncPersonDTO(_IosBase):
+    id: str
+    name: str | None = None
+    relationship: str | None = None
+    date_of_birth: str | None = None
+    biological_sex: str | None = None
+    exercise_frequency: str | None = None
+    sleep_quality: str | None = None
+    nutrition_level: str | None = None
+    stress_level: str | None = None
+    health_notes: str | None = None
+    conditions_json: str | None = None
+    medications: str | None = None
+    family_history_json: str | None = None
+    selected_outcomes_json: str | None = None
+    health_obstacles: str | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
+
+
+class IosSyncHabitDTO(_IosBase):
+    id: str
+    person_id: str | None = None
+    title: str | None = None
+    purpose: str | None = None
+    category: str | None = None
+    anchor: str | None = None
+    emoji: str | None = None
+    state: str | None = None
+    show_in_today: bool | None = None
+    identity_threshold: int | None = None
+    sort_order: int | None = None
+    created_at: str | None = None
+    graduated_at: str | None = None
+
+
+class IosSyncCheckInDTO(_IosBase):
+    id: str
+    habit_id: str | None = None
+    date: str | None = None
+    completed: bool | None = None
+    note: str | None = None
+
+
+class IosSyncFocusPlanDTO(_IosBase):
+    id: str
+    person_id: str | None = None
+    generated_at: str | None = None
+    week_number: int | None = None
+    reflection: str | None = None
+    insight: str | None = None
+    encouragement: str | None = None
+    methodology: str | None = None
+    health_snapshot: str | None = None
+    primary_action: str | None = None
+    primary_anchor: str | None = None
+    primary_reasoning: str | None = None
+    primary_connection: str | None = None
+    primary_category: str | None = None
+    primary_purpose: str | None = None
+    risk_assessment: str | None = None
+    alternatives_json: str | None = None
+    care_team_topic: str | None = None
+    care_team_specialist: str | None = None
+    care_team_reasoning: str | None = None
+
+
+class IosSyncMessageDTO(_IosBase):
+    id: str
+    person_id: str | None = None
+    habit_id: str | None = None
+    message_text: str | None = None
+    message_type: str | None = None
+    action_type: str | None = None
+    created_at: str | None = None
+
+
+class IosSyncChanges(_IosBase):
+    persons: list[IosSyncPersonDTO] = []
+    habits: list[IosSyncHabitDTO] = []
+    check_ins: list[IosSyncCheckInDTO] = []
+    focus_plans: list[IosSyncFocusPlanDTO] = []
+    messages: list[IosSyncMessageDTO] = []
+
+
+class IosSyncRequest(_IosBase):
+    person_id: str
+    last_sync: str | None = None
+    changes: IosSyncChanges = Field(default_factory=IosSyncChanges)
+
+
+class IosSyncResponse(_IosBase):
+    server_changes: IosSyncChanges = Field(default_factory=IosSyncChanges)
+    sync_token: str | None = None
