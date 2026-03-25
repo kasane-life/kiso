@@ -423,9 +423,13 @@ def sync_ios(body: IosSyncRequest, request: Request, _token: str = Depends(_veri
         if not response_key or not dto_class:
             continue
 
-        # person table has id, not person_id
+        # person table uses id, check_in uses habit_id (join through habit)
         if table == "person":
             where = "id = ?"
+            params_base = (body.person_id,)
+        elif table == "check_in":
+            # check_ins don't have person_id, join through habit
+            where = "habit_id IN (SELECT id FROM habit WHERE person_id = ?)"
             params_base = (body.person_id,)
         else:
             where = "person_id = ?"
