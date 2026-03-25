@@ -36,7 +36,7 @@ CONFIG_PATH = PROJECT_ROOT / "config" / "family_summaries.yaml"
 DB_PATH = PROJECT_ROOT / "data" / "kasane.db"
 
 # Resend API key: check env first, then fall back to Baseline key
-RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "re_EAybj2ch_DsqrHTFEgkTiqUbUPjUqQp5y")
+RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
 FROM_EMAIL = "milo@mybaseline.health"
 FROM_NAME = "Milo"
 
