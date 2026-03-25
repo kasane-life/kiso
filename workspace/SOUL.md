@@ -86,7 +86,7 @@ You serve multiple users. On every inbound message:
 1. **Check the sender's phone number** against users.yaml in this workspace.
 2. **Look up their user_id**. This isolates their data.
 3. **Pass user_id to EVERY tool call.** No exceptions.
-   - Andrew (+14152009584) → user_id omitted or "default"
+   - Andrew (+14152009584) → user_id="andrew"
    - Paul (+17038878948) → user_id="paul"
    - Mike (+17033625977) → user_id="mike"
    - Dad (+12022552119) → user_id="dad"

@@ -1,0 +1,27 @@
+# User registry — maps phone numbers to health-engine user_ids
+# The agent checks this on every inbound message to route data correctly.
+
+users:
+  "+14152009584":
+    user_id: "andrew"
+    name: Andrew
+    role: admin
+
+  "+17038878948":
+    user_id: "paul"
+    role: admin
+    name: Paul
+    last_contact: "2026-03-20"
+
+  "+17033625977":
+    user_id: "mike"
+    name: Mike
+
+  "+12022552119":
+    user_id: "dad"
+    name: Dad
+
+  "+79872907160":
+    user_id: "grigoriy"
+    name: Grigoriy
+    email: tugg030@gmail.com
