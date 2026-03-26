@@ -234,6 +234,10 @@ def create_app(config: GatewayConfig | None = None) -> "FastAPI":
 
         return _garmin_auth_page(user_id, state)
 
+    # Server-side rate limit: one Garmin auth attempt per user per 60 seconds
+    _garmin_auth_attempts: dict[str, float] = {}
+    _GARMIN_AUTH_COOLDOWN = 60  # seconds
+
     @app.post("/auth/garmin/submit")
     async def garmin_auth_submit(
         email: str = Form(...),
@@ -245,6 +249,18 @@ def create_app(config: GatewayConfig | None = None) -> "FastAPI":
         verified = _verify_state(state)
         if verified is None:
             return JSONResponse({"authenticated": False, "error": "Invalid or expired link."}, status_code=403)
+
+        # Server-side throttle
+        now = time.time()
+        last_attempt = _garmin_auth_attempts.get(user_id, 0)
+        if now - last_attempt < _GARMIN_AUTH_COOLDOWN:
+            wait = int(_GARMIN_AUTH_COOLDOWN - (now - last_attempt))
+            return JSONResponse({
+                "authenticated": False,
+                "error": f"Please wait {wait} seconds before trying again.",
+                "rate_limited": True,
+            })
+        _garmin_auth_attempts[user_id] = now
 
         result = _do_garmin_auth(email, password, token_store, verified[0])
         return JSONResponse(result)
@@ -412,13 +428,18 @@ def _do_garmin_auth(email: str, password: str, token_store: TokenStore, user_id:
         }
     except Exception as e:
         error_msg = str(e)
-        if "401" in error_msg:
+        is_rate_limited = False
+        if "429" in error_msg or "Too Many Requests" in error_msg:
+            error_msg = "Garmin is temporarily blocking login attempts. Please wait 15 minutes and try again. Do not retry until then."
+            is_rate_limited = True
+        elif "401" in error_msg:
             error_msg = "Invalid email or password."
         elif "MFA" in error_msg.upper() or "verification" in error_msg.lower():
             error_msg = "MFA required. Currently only non-MFA accounts are supported via web auth."
         return {
             "authenticated": False,
             "error": error_msg,
+            "rate_limited": is_rate_limited,
         }
 
 
@@ -542,6 +563,22 @@ def _garmin_auth_page(user_id: str, state: str) -> str:
         form.querySelectorAll('input[type="email"], input[type="password"]').forEach(i => {{
           i.value = ''; i.disabled = true;
         }});
+      }} else if (data.rate_limited) {{
+        status.className = 'status error';
+        status.textContent = data.error;
+        btn.disabled = true;
+        let secs = 900;
+        const timer = setInterval(() => {{
+          secs--;
+          btn.textContent = 'Wait ' + Math.ceil(secs/60) + ' min';
+          if (secs <= 0) {{
+            clearInterval(timer);
+            btn.disabled = false;
+            btn.textContent = 'Connect Garmin';
+            status.textContent = 'You can try again now.';
+            status.className = 'status';
+          }}
+        }}, 1000);
       }} else {{
         status.className = 'status error';
         status.textContent = data.error || 'Authentication failed. Check your credentials.';
