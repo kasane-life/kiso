@@ -134,10 +134,21 @@ docs/              API, Architecture, Roadmap, Methodology
 ## Rules
 
 - Never hardcode secrets in source files
-- Thresholds go in `engine/insights/rules.yaml`, not in code
+- Thresholds go in `engine/insights/rules.yaml`, not in code. Per-user overrides go in `data/users/<user_id>/rules.yaml`.
 - Use `python3` not `python`
-- Run tests: `python3 -m pytest tests/ -v` — all 416+ must pass
+- Run tests: `python3 -m pytest tests/ -v` — all 425+ must pass
 - Smoke test end-to-end before pushing
+- **Test with REAL user data, not just unit tests.** Unit tests passing does not mean the feature works for actual users. Before declaring a feature done, verify with at least one real user's data (e.g., run the briefing for Grigoriy and check that insights make sense for a 42M sedentary male, not just for Andrew).
+
+## Multi-User Data Quality — CRITICAL
+
+This system serves multiple users with very different profiles. What's "critical" for Andrew (35M athlete, RHR 48) is "normal" for Grigoriy (42M sedentary, RHR 66) and different again for Dad (75M).
+
+- **Per-user thresholds:** `data/users/<user_id>/rules.yaml` overrides defaults in `engine/insights/rules.yaml`. Always create this for new users with age/sex/fitness-appropriate values.
+- **Weight units:** Check user config `weight_unit` field. Apple Health sends kg for metric users. The system stores in lbs by default. Convert at ingestion.
+- **Habit windows:** Use `started_on` parameter in `gap_analysis()`. Don't show 3.3% completion for a habit that started yesterday.
+- **Streak grace period:** Streak counts from yesterday if today isn't logged yet. Don't punish users for not having checked in yet today.
+- **Before shipping any user-facing feature:** Run it against every active user's data and verify the output makes sense for THAT person.
 
 ## Engineering Standards
 
