@@ -194,6 +194,20 @@ async def api_handler(tool_name: str, request: Request, token: str = Query(None)
             if "user_id" not in params:
                 params["user_id"] = "default"
 
+    # Enforce user_id on write operations (prevents data going to wrong directory)
+    WRITE_TOOLS = {
+        "log_weight", "log_bp", "log_meal", "log_habits", "log_supplements",
+        "log_sleep", "log_medication", "log_session", "log_labs", "log_nudge",
+        "setup_profile", "checkin", "score", "get_meals", "get_daily_snapshot",
+        "pull_garmin", "pull_oura", "pull_whoop", "ingest_health_snapshot",
+        "save_coaching_message",
+    }
+    if tool_name in WRITE_TOOLS and not params.get("user_id"):
+        raise HTTPException(
+            400,
+            f"user_id is required for {tool_name}. Add &user_id=andrew (or the appropriate user) to the request."
+        )
+
     # Coerce types to match function signatures
     params = _coerce_params(tool_name, params)
 
