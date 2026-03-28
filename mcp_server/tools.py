@@ -18,7 +18,7 @@ PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 import yaml
-from engine.utils.csv_io import read_csv, write_csv
+from engine.utils.csv_io import read_csv, write_csv, append_csv
 
 # User home directory for pip-installed (uvx) usage
 _USER_HOME = Path(os.path.expanduser("~/.config/health-engine"))
@@ -469,7 +469,7 @@ def _log_meal(
     hour = datetime.now().hour
     time_of_day = "AM" if hour < 12 else ("PM" if hour < 17 else "EVE")
 
-    rows.append({
+    new_row = {
         "date": date,
         "meal_num": str(meal_num),
         "time_of_day": time_of_day,
@@ -479,8 +479,8 @@ def _log_meal(
         "fat_g": str(fat_g) if fat_g is not None else "",
         "calories": str(calories) if calories is not None else "",
         "notes": "",
-    })
-    write_csv(path, rows, fieldnames=fieldnames)
+    }
+    append_csv(path, new_row, fieldnames=fieldnames)
     return {"logged": True, "date": date, "meal_num": meal_num, "description": description, "protein_g": protein_g}
 
 
@@ -2495,6 +2495,11 @@ def register_tools(mcp: FastMCP):
         """Get a daily digest summary of a person's habits, check-ins, streaks, and health data. Use for family members who want updates on their loved one's progress. Pass the person_id (Kasane UUID) to generate the summary."""
         return _get_family_summary(person_id)
 
+    @mcp.tool()
+    def save_coaching_message(person_id: str, message_text: str, habit_id: str | None = None, message_type: str = "coaching", user_id: str | None = None) -> dict:
+        """Save a coaching message to kasane.db so it syncs to the Kasane iOS app. Call this after sending a coaching response to ensure the user sees it in-app too. person_id is the Kasane UUID."""
+        return _save_coaching_message(person_id, message_text, habit_id, message_type, user_id)
+
 def register_resources(mcp: FastMCP):
     """Register MCP resources (readable documents)."""
 
@@ -2507,3 +2512,41 @@ def register_resources(mcp: FastMCP):
         if not methodology_path.exists():
             return "METHODOLOGY.md not found."
         return methodology_path.read_text()
+
+
+def _save_coaching_message(
+    person_id: str,
+    message_text: str,
+    habit_id: str | None = None,
+    message_type: str = "coaching",
+    user_id: str | None = None,
+) -> dict:
+    """Save a coaching message to kasane.db so it syncs to the iOS app."""
+    import uuid
+    from datetime import datetime, timezone
+
+    db_path = Path(__file__).parent.parent / 'data' / 'kasane.db'
+    if not db_path.exists():
+        return {'error': 'kasane.db not found'}
+
+    import sqlite3
+    conn = sqlite3.connect(str(db_path))
+    cursor = conn.cursor()
+
+    msg_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc).isoformat()
+
+    cursor.execute(
+        'INSERT INTO check_in_message (id, person_id, habit_id, message_text, message_type, action_type, created_at, updated_at) '
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        (msg_id, person_id, habit_id, message_text, message_type, 'coaching', now, now)
+    )
+    conn.commit()
+    conn.close()
+
+    return {
+        'status': 'saved',
+        'message_id': msg_id,
+        'person_id': person_id,
+        'syncs_to_ios': True,
+    }
