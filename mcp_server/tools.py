@@ -458,6 +458,25 @@ def _log_habits(habits: dict, date: str | None = None, user_id: str | None = Non
         target_row[k] = v
 
     write_csv(path, rows, fieldnames=fieldnames)
+
+    # SQLite write (normalized: one row per habit)
+    import uuid as _uuid
+    person_id = _resolve_person_id(user_id)
+    if person_id:
+        from engine.gateway.db import get_db, init_db
+        init_db()
+        db = get_db()
+        now = datetime.now().isoformat()
+        for habit_name, val in habits.items():
+            completed = str(val).strip().lower() in ("1", "true", "yes", "x", "done")
+            rid = str(_uuid.uuid5(_uuid.NAMESPACE_URL, f"{person_id}:habit_log:{date}:{habit_name}"))
+            db.execute(
+                "INSERT OR REPLACE INTO habit_log (id, person_id, date, habit_name, completed, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (rid, person_id, date, habit_name, int(completed), now, now),
+            )
+        db.commit()
+
     return {"logged": True, "date": date, "habits": habits}
 
 
@@ -1658,6 +1677,29 @@ def _log_labs(
 
     with open(lab_path, "w") as f:
         json.dump(data, f, indent=2)
+
+    # SQLite write (lab_draw + lab_result)
+    import uuid as _uuid
+    person_id = _resolve_person_id(user_id)
+    if person_id:
+        from engine.gateway.db import get_db, init_db
+        init_db()
+        db = get_db()
+        now = datetime.now().isoformat()
+        draw_id = str(_uuid.uuid5(_uuid.NAMESPACE_URL, f"{person_id}:lab_draw:{date}:{source}"))
+        db.execute(
+            "INSERT OR IGNORE INTO lab_draw (id, person_id, date, source, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (draw_id, person_id, date, source, now, now),
+        )
+        for marker, val in normalized.items():
+            result_id = str(_uuid.uuid5(_uuid.NAMESPACE_URL, f"{person_id}:lab_result:{date}:{marker}"))
+            db.execute(
+                "INSERT OR REPLACE INTO lab_result (id, draw_id, person_id, marker, value, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (result_id, draw_id, person_id, marker, val, now, now),
+            )
+        db.commit()
 
     scored = [k for k in normalized if k in _SCORED_FIELDS]
     extra = [k for k in normalized if k not in _SCORED_FIELDS]

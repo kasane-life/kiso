@@ -58,6 +58,25 @@ def build_briefing(config: dict) -> dict:
         data_dir = raw_data_dir
     else:
         data_dir = (Path(__file__).parent.parent.parent / raw_data_dir).resolve()
+
+    # Resolve person_id for SQLite reads (derive from data_dir user_id)
+    _person_id = None
+    try:
+        # data_dir is like .../data/users/andrew → user_id = "andrew"
+        if "users" in data_dir.parts:
+            user_id = data_dir.name
+            from engine.gateway.db import get_db, init_db
+            init_db()
+            _db = get_db()
+            _row = _db.execute(
+                "SELECT id FROM person WHERE health_engine_user_id = ? AND deleted_at IS NULL",
+                (user_id,),
+            ).fetchone()
+            if _row:
+                _person_id = _row["id"]
+    except Exception:
+        pass
+
     profile_cfg = config.get("profile", {})
     targets = config.get("targets", {})
     today = datetime.now().strftime("%Y-%m-%d")
@@ -162,7 +181,7 @@ def build_briefing(config: dict) -> dict:
         profile.diastolic = latest_bp["dia"]
 
     # Incorporate latest weight into profile
-    weights_for_score = _load_weight_log(data_dir)
+    weights_for_score = _load_weight_log(data_dir, person_id=_person_id)
     if weights_for_score:
         profile.weight_lbs = weights_for_score[-1]["weight"]
 
@@ -251,8 +270,8 @@ def build_briefing(config: dict) -> dict:
     }
 
     # --- Insights ---
-    weights_data = _load_weight_log(data_dir)
-    bp_data = _load_bp_log(data_dir)
+    weights_data = _load_weight_log(data_dir, person_id=_person_id)
+    bp_data = _load_bp_log(data_dir, person_id=_person_id)
     trends = _build_trends(garmin_daily or oura_daily or whoop_daily)
     briefing["data_available"]["weight_log"] = weights_data is not None
     briefing["data_available"]["bp_log"] = bp_data is not None
@@ -647,7 +666,23 @@ def _load_lab_results(data_dir: Path) -> Optional[dict]:
         return json.load(f)
 
 
-def _load_weight_log(data_dir: Path) -> Optional[list]:
+def _load_weight_log(data_dir: Path, person_id: str | None = None) -> Optional[list]:
+    # Try SQLite first
+    if person_id:
+        try:
+            from engine.gateway.db import get_db, init_db
+            init_db()
+            db = get_db()
+            rows = db.execute(
+                "SELECT date, weight_lbs FROM weight_entry WHERE person_id = ? ORDER BY date",
+                (person_id,),
+            ).fetchall()
+            if rows:
+                return [{"weight": r["weight_lbs"], "date": r["date"]} for r in rows]
+        except Exception:
+            pass
+
+    # Fallback to CSV
     path = data_dir / "weight_log.csv"
     if not path.exists():
         return None
@@ -659,7 +694,23 @@ def _load_weight_log(data_dir: Path) -> Optional[list]:
     return weights if weights else None
 
 
-def _load_bp_log(data_dir: Path) -> Optional[list]:
+def _load_bp_log(data_dir: Path, person_id: str | None = None) -> Optional[list]:
+    # Try SQLite first
+    if person_id:
+        try:
+            from engine.gateway.db import get_db, init_db
+            init_db()
+            db = get_db()
+            rows = db.execute(
+                "SELECT date, systolic, diastolic FROM bp_entry WHERE person_id = ? ORDER BY date",
+                (person_id,),
+            ).fetchall()
+            if rows:
+                return [{"sys": r["systolic"], "dia": r["diastolic"]} for r in rows]
+        except Exception:
+            pass
+
+    # Fallback to CSV
     path = data_dir / "bp_log.csv"
     if not path.exists():
         return None
