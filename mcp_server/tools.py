@@ -2568,6 +2568,91 @@ def _get_person_context(person_id: str | None = None, user_id: str | None = None
 # Family summary (Kasane person habits/check-ins digest)
 # =====================================================================
 
+# =====================================================================
+# Coach task assignment
+# =====================================================================
+
+def _log_coach_task(
+    user_id: str,
+    task_type: str,
+    description: str,
+    priority: str = "normal",
+    context: str | None = None,
+) -> dict:
+    """Create a task for the human coach to review.
+
+    Used when Milo detects something requiring human judgment:
+    compound lab patterns, re-engagement decisions, onboarding review, etc.
+
+    Tasks are stored in data/admin/coach_tasks.json and included in the weekly ops digest.
+    """
+    tasks_path = PROJECT_ROOT / "data" / "admin" / "coach_tasks.json"
+    tasks_path.parent.mkdir(parents=True, exist_ok=True)
+
+    existing = []
+    if tasks_path.exists():
+        try:
+            with open(tasks_path) as f:
+                existing = json.load(f)
+        except (json.JSONDecodeError, IOError):
+            existing = []
+
+    import uuid as _uuid
+    task = {
+        "id": str(_uuid.uuid4())[:8],
+        "user_id": user_id,
+        "type": task_type,
+        "description": description,
+        "priority": priority,
+        "context": context,
+        "status": "pending",
+        "created_at": datetime.now().isoformat(),
+    }
+    existing.append(task)
+
+    with open(tasks_path, "w") as f:
+        json.dump(existing, f, indent=2)
+
+    return {"created": True, "task_id": task["id"], "type": task_type, "priority": priority}
+
+
+def _get_coach_tasks(status: str = "pending") -> dict:
+    """Get pending coach tasks for the weekly digest."""
+    tasks_path = PROJECT_ROOT / "data" / "admin" / "coach_tasks.json"
+    if not tasks_path.exists():
+        return {"tasks": [], "count": 0}
+
+    with open(tasks_path) as f:
+        all_tasks = json.load(f)
+
+    filtered = [t for t in all_tasks if t.get("status") == status]
+    return {"tasks": filtered, "count": len(filtered)}
+
+
+def _complete_coach_task(task_id: str) -> dict:
+    """Mark a coach task as completed."""
+    tasks_path = PROJECT_ROOT / "data" / "admin" / "coach_tasks.json"
+    if not tasks_path.exists():
+        return {"error": "No tasks file"}
+
+    with open(tasks_path) as f:
+        tasks = json.load(f)
+
+    for t in tasks:
+        if t.get("id") == task_id:
+            t["status"] = "completed"
+            t["completed_at"] = datetime.now().isoformat()
+            with open(tasks_path, "w") as f:
+                json.dump(tasks, f, indent=2)
+            return {"completed": True, "task_id": task_id}
+
+    return {"error": f"Task {task_id} not found"}
+
+
+# =====================================================================
+# Family summary (Kasane person habits/check-ins digest)
+# =====================================================================
+
 def _get_family_summary(person_id: str) -> dict:
     """Generate a family-friendly summary of a person's habits, check-ins, and health data.
 
@@ -2623,6 +2708,9 @@ TOOL_REGISTRY = {
     "ingest_health_snapshot": _ingest_health_snapshot,
     "get_person_context": _get_person_context,
     "get_family_summary": _get_family_summary,
+    "log_coach_task": _log_coach_task,
+    "get_coach_tasks": _get_coach_tasks,
+    "complete_coach_task": _complete_coach_task,
     # Excluded from HTTP: auth_garmin (interactive), auth_oura (interactive),
     # auth_whoop (interactive), open_dashboard (browser)
 }
@@ -2969,6 +3057,21 @@ def register_tools(mcp: FastMCP):
     def get_family_summary(person_id: str) -> dict:
         """Get a daily digest summary of a person's habits, check-ins, streaks, and health data. Use for family members who want updates on their loved one's progress. Pass the person_id (Kasane UUID) to generate the summary."""
         return _get_family_summary(person_id)
+
+    @mcp.tool()
+    def log_coach_task(user_id: str, task_type: str, description: str, priority: str = "normal", context: str | None = None) -> dict:
+        """Create a task for the human coach. Use when you detect a compound lab pattern you're uncertain about, a user needs re-engagement review, or any situation where human judgment adds value. Types: lab_review, re_engagement, onboarding_review, compound_pattern, custom. Priorities: low, normal, high."""
+        return _log_coach_task(user_id, task_type, description, priority, context)
+
+    @mcp.tool()
+    def get_coach_tasks(status: str = "pending") -> dict:
+        """Get pending coach tasks. Used by the ops agent for weekly digests and by Andrew to review what needs attention."""
+        return _get_coach_tasks(status)
+
+    @mcp.tool()
+    def complete_coach_task(task_id: str) -> dict:
+        """Mark a coach task as completed. Andrew calls this after reviewing and acting on a task."""
+        return _complete_coach_task(task_id)
 
     @mcp.tool()
     def save_coaching_message(person_id: str, message_text: str, habit_id: str | None = None, message_type: str = "coaching", user_id: str | None = None) -> dict:

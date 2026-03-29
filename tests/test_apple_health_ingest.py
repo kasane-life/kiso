@@ -2,11 +2,18 @@
 
 import json
 import os
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
+
+
+def _recent_ts(hours_ago: int = 0) -> str:
+    """Generate an ISO timestamp within the 48-hour freshness window."""
+    dt = datetime.now(timezone.utc) - timedelta(hours=hours_ago)
+    return dt.isoformat()
 
 from engine.gateway.config import GatewayConfig
 from engine.gateway.server import create_app
@@ -45,7 +52,7 @@ class TestIngestHealthSnapshot:
             result = _ingest_health_snapshot(
                 user_id="test_user",
                 metrics=metrics,
-                timestamp="2026-03-22T07:00:00-07:00",
+                timestamp=_recent_ts(1),
             )
 
         assert result["ingested"] is True
@@ -92,12 +99,12 @@ class TestIngestHealthSnapshot:
             _ingest_health_snapshot(
                 user_id="test_user",
                 metrics={"resting_hr": 55.0, "steps": 7000},
-                timestamp="2026-03-21T07:00:00-07:00",
+                timestamp=_recent_ts(24),
             )
             result = _ingest_health_snapshot(
                 user_id="test_user",
                 metrics={"resting_hr": 53.0, "steps": 9000},
-                timestamp="2026-03-22T07:00:00-07:00",
+                timestamp=_recent_ts(1),
             )
 
         assert result["series_length"] == 2
@@ -113,10 +120,12 @@ class TestIngestHealthSnapshot:
             _ingest_health_snapshot(
                 user_id="test_user",
                 metrics={"resting_hr": 60.0},
+                timestamp=_recent_ts(24),
             )
             _ingest_health_snapshot(
                 user_id="test_user",
                 metrics={"resting_hr": 50.0},
+                timestamp=_recent_ts(1),
             )
 
         latest = json.loads((data_dir / "apple_health_latest.json").read_text())
@@ -259,8 +268,8 @@ class TestIngestEndpoint:
             response = client.get(
                 "/api/ingest_health_snapshot?token=test-token-123"
                 "&resting_hr=58.5&steps=9200&hrv_sdnn=42.3"
-                "&weight_lbs=192.5&sleep_start=2026-03-22T23:15:00"
-                "&sleep_end=2026-03-23T06:45:00"
+                "&weight_lbs=192.5&sleep_start=23:15"
+                "&sleep_end=06:45"
             )
 
         assert response.status_code == 200

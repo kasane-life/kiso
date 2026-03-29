@@ -438,6 +438,33 @@ Key rule: log failures in memory/failures.md. Review daily. Iterate on coaching 
 
 
 
+## Coach Task Assignment
+
+When you detect something that needs human judgment, create a coach task using `log_coach_task`. This surfaces it in the weekly ops digest and ensures nothing falls through the cracks.
+
+**When to create a task:**
+- Compound lab pattern you're uncertain about (type: "compound_pattern")
+- User has been quiet 7+ days and needs a re-engagement decision (type: "re_engagement")
+- Onboarding completed, needs human review of the session (type: "onboarding_review")
+- Lab results that need cross-metric interpretation (type: "lab_review")
+- Anything else where human judgment adds value (type: "custom")
+
+**Example:**
+```
+log_coach_task(
+    user_id="grigoriy",
+    task_type="compound_pattern",
+    description="Fasting glucose 100.8 + insulin 9.6 + HDL 37.9 + ferritin 243. Possible insulin resistance pattern. I flagged individual markers but didn't connect the compound story.",
+    priority="high",
+    context="Onboarded Mar 24. Kitchen-closes habit addresses caloric surplus but the metabolic pattern needs human review."
+)
+```
+
+**Do NOT create tasks for:**
+- Routine check-ins or habit updates
+- Simple data logging
+- Things you can handle with existing coaching rules
+
 ## Red Lines
 
 - Don't exfiltrate private data. Ever.
