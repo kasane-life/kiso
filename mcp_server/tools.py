@@ -122,6 +122,23 @@ def _latest_labs_sqlite(person_id: str | None) -> dict | None:
         return None
 
 
+def _garmin_token_dir(user_id: str | None = None) -> str | None:
+    """Resolve per-user Garmin token directory. Returns None if no tokens exist.
+
+    NEVER falls back to another user's tokens. Each user must authenticate independently.
+    """
+    if user_id and user_id != "default":
+        user_path = Path(os.path.expanduser("~/.config/health-engine/tokens/garmin")) / user_id
+        if user_path.exists() and any(user_path.iterdir()):
+            return str(user_path)
+        return None  # No tokens for this user
+    # Legacy CLI path (no user_id context, e.g. direct CLI usage)
+    legacy = Path(os.path.expanduser("~/.config/health-engine/garmin-tokens"))
+    if legacy.exists() and any(legacy.iterdir()):
+        return str(legacy)
+    return None
+
+
 def _load_config(user_id: str | None = None) -> dict:
     path = _config_path(user_id)
     if not path.exists():
@@ -789,10 +806,15 @@ def _get_meals(
         if d == today_str:
             try:
                 from engine.integrations.garmin import GarminClient
-                gc_config = _load_config(user_id)
-                gc = GarminClient.from_config(gc_config)
-                gc.data_dir = data_dir
-                live = gc.pull_today()
+                gc_token_dir = _garmin_token_dir(user_id)
+                if gc_token_dir:
+                    gc_config = _load_config(user_id)
+                    gc_config.setdefault("garmin", {})["token_dir"] = gc_token_dir
+                    gc = GarminClient.from_config(gc_config)
+                    gc.data_dir = data_dir
+                    live = gc.pull_today()
+                else:
+                    live = {}
                 if live.get("calories_total") and live["calories_total"] > 0:
                     burn = {
                         "total": live["calories_total"],
@@ -994,9 +1016,8 @@ def _onboard(user_id: str | None = None) -> dict:
         data_sources[name] = (data_dir / name).exists()
 
     from engine.integrations.garmin import GarminClient
-    garmin_cfg = config.get("garmin", {})
-    garmin_token_dir = garmin_cfg.get("token_dir")
-    garmin_tokens = GarminClient.has_tokens(token_dir=garmin_token_dir)
+    garmin_token_dir = _garmin_token_dir(user_id)
+    garmin_tokens = garmin_token_dir is not None
     garmin_has_data = garmin_path.exists()
     garmin_freshness = None
     if garmin_has_data:
@@ -1064,9 +1085,12 @@ def _onboard(user_id: str | None = None) -> dict:
 def _auth_garmin(user_id: str | None = None) -> dict:
     from mcp_server.garmin_auth import run_auth_flow
 
-    config = _load_config(user_id)
-    garmin_cfg = config.get("garmin", {})
-    token_dir = garmin_cfg.get("token_dir", os.path.expanduser("~/.config/health-engine/garmin-tokens"))
+    # Per-user token directory: tokens/garmin/{user_id}
+    if user_id and user_id != "default":
+        token_dir = str(Path(os.path.expanduser("~/.config/health-engine/tokens/garmin")) / user_id)
+    else:
+        token_dir = os.path.expanduser("~/.config/health-engine/garmin-tokens")
+    Path(token_dir).mkdir(parents=True, exist_ok=True)
     return run_auth_flow(token_dir=token_dir)
 
 
@@ -1076,15 +1100,15 @@ def _pull_garmin(history: bool = False, workouts: bool = False, user_id: str | N
     config = _load_config(user_id)
     if user_id and user_id != "default":
         config["data_dir"] = str(_data_dir(user_id))
-        # Per-user Garmin tokens: never fall back to another user's tokens
-        user_token_dir = str(Path(os.path.expanduser("~/.config/health-engine/tokens/garmin")) / user_id)
-        config.setdefault("garmin", {})["token_dir"] = user_token_dir
-        if not GarminClient.has_tokens(user_token_dir):
-            return {
-                "pulled": False,
-                "error": f"No Garmin tokens for user '{user_id}'. They need to authenticate first.",
-                "hint": f"Send them the auth link: connect_wearable(service='garmin', user_id='{user_id}')",
-            }
+    # Per-user Garmin tokens: never fall back to another user's tokens
+    token_dir = _garmin_token_dir(user_id)
+    if not token_dir:
+        return {
+            "pulled": False,
+            "error": f"No Garmin tokens for user '{user_id or 'default'}'. They need to authenticate first.",
+            "hint": f"Send them the auth link: connect_wearable(service='garmin', user_id='{user_id}')",
+        }
+    config.setdefault("garmin", {})["token_dir"] = token_dir
     try:
         client = GarminClient.from_config(config)
         person_id = _resolve_person_id(user_id)
@@ -1117,10 +1141,8 @@ def _pull_garmin(history: bool = False, workouts: bool = False, user_id: str | N
 def _connect_garmin(user_id: str | None = None) -> dict:
     from engine.integrations.garmin import GarminClient
 
-    config = _load_config(user_id)
-    garmin_cfg = config.get("garmin", {})
-    token_dir = garmin_cfg.get("token_dir")
-    has_tokens = GarminClient.has_tokens(token_dir=token_dir)
+    token_dir = _garmin_token_dir(user_id)
+    has_tokens = token_dir is not None
 
     data_dir = _data_dir(user_id)
     garmin_path = data_dir / "garmin_latest.json"
