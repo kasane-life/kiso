@@ -2761,7 +2761,7 @@ def register_tools(mcp: FastMCP):
 
     @mcp.tool()
     def score(user_id: str | None = None) -> dict:
-        """Scoring engine deep-dive: coverage %, NHANES percentiles for 20 metrics, tier breakdown, and ranked gap analysis showing what to measure next."""
+        """Get the user's health coverage score. Returns coverage %, NHANES percentiles for 20 metrics, tier breakdown, and ranked gap analysis showing what to measure next. Just call it, no parameters needed. user_id is optional, omit for the local user."""
         return _score(user_id)
 
     @mcp.tool()
@@ -2804,7 +2804,7 @@ def register_tools(mcp: FastMCP):
         date: str | None = None,
         user_id: str | None = None,
     ) -> dict:
-        """Log a meal. Protein is required; carbs, fat, calories are optional. Date defaults to today."""
+        """Log a meal. Estimate protein from the description if the user doesn't give exact numbers. Carbs, fat, calories are optional. Date defaults to today."""
         return _log_meal(description, protein_g, carbs_g, fat_g, calories, date, user_id)
 
     @mcp.tool()
@@ -2845,9 +2845,7 @@ def register_tools(mcp: FastMCP):
 
     @mcp.tool()
     def onboard(user_id: str | None = None) -> dict:
-        """Coverage map and guided setup. Shows all 20 health metrics,
-        what's tracked vs missing, and ranked next steps by leverage.
-        Call for new users or when someone asks 'what should I measure?'"""
+        """IMPORTANT: Call this FIRST when a new user interacts with you, or when someone says 'what should I measure?', 'set me up', or 'what can you do?'. Returns all 20 health metrics, what's tracked vs missing, and ranked next steps by leverage. After calling this, call get_coaching_resource('onboarding') to load the full coaching conversation flow."""
         return _onboard(user_id)
 
     @mcp.tool()
@@ -2975,7 +2973,7 @@ def register_tools(mcp: FastMCP):
         tobacco_use: str | None = None,
         user_id: str | None = None,
     ) -> dict:
-        """Create or update config.yaml with user profile. Sex should be 'M' or 'F'. Weight target in lbs, protein in grams."""
+        """Save user profile info: age, sex, goals, weight target, conditions. Call this when the user shares personal health details. Sex = 'M' or 'F'. You can call this incrementally as info is shared. user_id is optional, omit for the local user."""
         return _setup_profile(
             age, sex, weight_target, protein_target, family_history, medications,
             waist_inches, phq9_score, name, goals, obstacles, existing_habits,
@@ -2997,7 +2995,7 @@ def register_tools(mcp: FastMCP):
 
     @mcp.tool()
     def get_user_profile(user_id: str | None = None) -> dict:
-        """Retrieve full user profile including intake data, targets, and active protocols. Useful for understanding a user's context before coaching."""
+        """Read the user's saved profile: age, sex, goals, targets, conditions. Call this to check what you already know about someone before asking them questions you might already have answers to. user_id is optional, omit for the local user."""
         return _get_user_profile(user_id)
 
     @mcp.tool()
@@ -3059,12 +3057,12 @@ def register_tools(mcp: FastMCP):
 
     @mcp.tool()
     def get_skill_ladder(goal_id: str) -> dict:
-        """Get the ranked skill ladder for a goal. Returns levels ordered by expected impact, each with a habit, evidence rationale, and diagnostic question. Use during onboarding and program transitions to find the right starting point for a user. Valid goal_ids: sleep-better, less-stress, lose-weight, build-strength, more-energy, sharper-focus, better-mood, eat-healthier."""
+        """Get the habit progression for a specific goal. Returns levels ranked by impact: each level has a habit, evidence, and a diagnostic question to ask the user. Use this after the user picks a goal to find their starting level. Valid: sleep-better, less-stress, lose-weight, build-strength, more-energy, sharper-focus, better-mood, eat-healthier."""
         return _get_skill_ladder(goal_id)
 
     @mcp.tool()
     def get_coaching_resource(topic: str) -> dict:
-        """Load a coaching resource file on demand. Available topics: onboarding, program-engine, self-review. Call this when you need the full onboarding flow, program engine details, or self-review protocol instead of relying on the stubs in AGENTS.md."""
+        """Load coaching methodology and conversation flows. MUST call this to know how to coach properly. Topics: 'onboarding' (the 5-message new user flow with goal clusters and habit programs), 'program-engine' (14-day focused blocks, skill ladders), 'self-review' (weekly reflection). Call get_coaching_resource('onboarding') after onboard() to learn the full coaching conversation flow."""
         return _get_coaching_resource(topic)
 
     @mcp.tool()
