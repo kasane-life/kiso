@@ -625,61 +625,252 @@ class GarminClient:
         burns.sort(key=lambda x: x["date"])
         return burns
 
-    def pull_all(self, history=False, history_days=90, workouts=False, workout_days=7) -> dict:
-        """Pull all standard Garmin metrics. Returns a dict compatible with the scoring engine."""
-        print("\nPulling Garmin data...")
+    def _pull_day_snapshot(self, d: str) -> dict:
+        """Pull a single day's complete data in 3 API calls.
 
-        rhr = self.pull_resting_hr()
-        steps = self.pull_steps()
-        sleep_stdev = self.pull_sleep_regularity()
-        sleep_duration = self.pull_sleep_duration()
-        vo2 = self.pull_vo2_max()
-        hrv = self.pull_hrv()
-        zone2 = self.pull_zone2_minutes()
+        Args:
+            d: Date string in ISO format (YYYY-MM-DD).
 
-        garmin_data = {
-            "last_updated": datetime.now().isoformat(timespec="seconds"),
-            "resting_hr": rhr,
-            "daily_steps_avg": steps,
-            "sleep_regularity_stddev": sleep_stdev,
-            "sleep_duration_avg": sleep_duration,
-            "vo2_max": vo2,
-            "hrv_rmssd_avg": hrv,
-            "zone2_min_per_week": zone2,
+        Returns:
+            Dict with all daily metrics from get_stats + get_sleep_data + get_hrv_data.
+        """
+        entry = {
+            "date": d, "steps": None, "rhr": None, "hrv": None,
+            "hrv_weekly_avg": None, "hrv_status": None,
+            "sleep_hrs": None, "deep_sleep_hrs": None, "light_sleep_hrs": None,
+            "rem_sleep_hrs": None, "awake_hrs": None, "sleep_start": None,
+            "calories_total": None, "calories_active": None, "calories_bmr": None,
+            "stress_avg": None, "floors": None, "distance_m": None,
+            "max_hr": None, "min_hr": None,
         }
 
-        # Save to data dir — only if we actually got data
+        # Call 1: get_stats (steps, RHR, calories, distance, floors, stress, HR)
+        try:
+            stats = self.client.get_stats(d)
+            if stats:
+                steps = stats.get("totalSteps")
+                if isinstance(steps, (int, float)) and steps > 0:
+                    entry["steps"] = int(steps)
+                rhr = stats.get("restingHeartRate")
+                if isinstance(rhr, (int, float)) and rhr > 0:
+                    entry["rhr"] = round(rhr, 1)
+                entry["calories_total"] = stats.get("totalKilocalories")
+                entry["calories_active"] = stats.get("activeKilocalories") or stats.get("wellnessActiveKilocalories")
+                entry["calories_bmr"] = stats.get("bmrKilocalories")
+                entry["stress_avg"] = stats.get("averageStressLevel")
+                entry["floors"] = stats.get("floorsAscended")
+                entry["distance_m"] = stats.get("totalDistanceMeters")
+                entry["max_hr"] = stats.get("maxHeartRate")
+                entry["min_hr"] = stats.get("minHeartRate")
+        except Exception as e:
+            print(f"  get_stats({d}) error: {e}", file=sys.stderr)
+
+        # Call 2: get_sleep_data (duration, stages, bedtime)
+        try:
+            sleep = self.client.get_sleep_data(d)
+            if sleep:
+                dto = sleep.get("dailySleepDTO", {})
+                secs = dto.get("sleepTimeSeconds")
+                if secs and isinstance(secs, (int, float)) and secs > 0:
+                    entry["sleep_hrs"] = round(secs / 3600, 1)
+                deep = dto.get("deepSleepSeconds")
+                if deep and isinstance(deep, (int, float)):
+                    entry["deep_sleep_hrs"] = round(deep / 3600, 1)
+                light = dto.get("lightSleepSeconds")
+                if light and isinstance(light, (int, float)):
+                    entry["light_sleep_hrs"] = round(light / 3600, 1)
+                rem = dto.get("remSleepSeconds")
+                if rem and isinstance(rem, (int, float)):
+                    entry["rem_sleep_hrs"] = round(rem / 3600, 1)
+                awake = dto.get("awakeSleepSeconds")
+                if awake and isinstance(awake, (int, float)):
+                    entry["awake_hrs"] = round(awake / 3600, 1)
+                ts = dto.get("sleepStartTimestampLocal")
+                if ts:
+                    start_dt = datetime.fromtimestamp(ts / 1000)
+                    entry["sleep_start"] = start_dt.strftime("%H:%M")
+                    if secs and secs > 0:
+                        end_dt = start_dt + timedelta(seconds=secs)
+                        entry["sleep_end"] = end_dt.strftime("%H:%M")
+        except Exception as e:
+            print(f"  get_sleep_data({d}) error: {e}", file=sys.stderr)
+
+        # Call 3: get_hrv_data (last night avg, weekly avg, status)
+        try:
+            hrv_data = self.client.get_hrv_data(d)
+            if hrv_data:
+                summary = hrv_data.get("hrvSummary", {}) or {}
+                nightly = hrv_data.get("lastNightAvg") or summary.get("lastNightAvg")
+                weekly = hrv_data.get("weeklyAvg") or summary.get("weeklyAvg")
+                val = nightly or weekly
+                if val and isinstance(val, (int, float)) and val > 0:
+                    entry["hrv"] = round(val, 1)
+                if weekly and isinstance(weekly, (int, float)):
+                    entry["hrv_weekly_avg"] = round(weekly, 1)
+                entry["hrv_status"] = hrv_data.get("status") or summary.get("status")
+        except Exception as e:
+            print(f"  get_hrv_data({d}) error: {e}", file=sys.stderr)
+
+        return entry
+
+    def _append_to_daily_series(self, snapshot: dict) -> list:
+        """Append a day snapshot to garmin_daily.json, deduplicating by date.
+
+        Returns the full series list.
+        """
+        series_path = self.data_dir / "garmin_daily.json"
+        series = []
+        if series_path.exists():
+            try:
+                with open(series_path) as f:
+                    series = json.load(f)
+            except (json.JSONDecodeError, IOError):
+                series = []
+
+        # Remove existing entry for this date, then append new one
+        snap_date = snapshot["date"]
+        series = [e for e in series if e.get("date") != snap_date]
+        series.append(snapshot)
+        series.sort(key=lambda e: e.get("date", ""))
+
+        # Keep at most 180 days
+        if len(series) > 180:
+            series = series[-180:]
+
+        with open(series_path, "w") as f:
+            json.dump(series, f, indent=2)
+
+        return series
+
+    def _compute_averages(self, series: list) -> dict:
+        """Compute 7-day and 30-day averages from the daily series.
+
+        Returns a dict matching the garmin_latest.json schema.
+        """
+        def _avg(entries, key, days):
+            recent = [e for e in entries[-days:] if e.get(key) is not None]
+            if not recent:
+                return None
+            return round(statistics.mean(e[key] for e in recent), 1)
+
+        def _sleep_regularity(entries, days=30):
+            bedtimes = []
+            for e in entries[-days:]:
+                st = e.get("sleep_start")
+                if not st:
+                    continue
+                parts = st.split(":")
+                if len(parts) == 2:
+                    minutes = int(parts[0]) * 60 + int(parts[1])
+                    if minutes < 720:  # before noon = after midnight
+                        minutes += 1440
+                    bedtimes.append(minutes)
+            if len(bedtimes) > 1:
+                return round(statistics.stdev(bedtimes), 1)
+            return None
+
+        return {
+            "resting_hr": _avg(series, "rhr", 30),
+            "daily_steps_avg": round(_avg(series, "steps", 30)) if _avg(series, "steps", 30) else None,
+            "sleep_duration_avg": _avg(series, "sleep_hrs", 30),
+            "sleep_regularity_stddev": _sleep_regularity(series, 30),
+            "hrv_rmssd_avg": _avg(series, "hrv", 7),
+            # VO2 and zone2 don't come from daily series
+            "vo2_max": None,
+            "zone2_min_per_week": None,
+        }
+
+    def pull_all(self, history=False, history_days=90, workouts=False, workout_days=7) -> dict:
+        """Pull Garmin metrics. 3 API calls for today + local aggregation.
+
+        With history=True, backfills daily series (for initial setup or recovery).
+        """
+        print("\nPulling Garmin data...")
         self.data_dir.mkdir(parents=True, exist_ok=True)
+
+        # Pull today's snapshot (3 API calls)
+        today_str = date.today().isoformat()
+        snapshot = self._pull_day_snapshot(today_str)
+
+        filled = sum(1 for k, v in snapshot.items() if k != "date" and v is not None)
+        print(f"  Today ({today_str}): {filled} metrics from 3 API calls")
+
+        # Also pull yesterday if today is sparse (watch may not have synced yet)
+        if not snapshot.get("sleep_hrs") and not snapshot.get("steps"):
+            yesterday_str = (date.today() - timedelta(days=1)).isoformat()
+            yesterday = self._pull_day_snapshot(yesterday_str)
+            self._append_to_daily_series(yesterday)
+            y_filled = sum(1 for k, v in yesterday.items() if k != "date" and v is not None)
+            print(f"  Yesterday ({yesterday_str}): {y_filled} metrics (today was sparse)")
+
+        # Append today to daily series
+        series = self._append_to_daily_series(snapshot)
+
+        # VO2 max (doesn't change daily, grab from get_stats or latest in series)
+        vo2 = None
+        try:
+            data = self.client.get_max_metrics(today_str)
+            if data:
+                entry = data[0] if isinstance(data, list) and data else data
+                vo2 = entry.get("generic", {}).get("vo2MaxValue") if isinstance(entry.get("generic"), dict) else None
+                if vo2 is None:
+                    vo2 = entry.get("vo2MaxValue")
+                if vo2 and isinstance(vo2, (int, float)) and vo2 > 0:
+                    vo2 = round(vo2, 1)
+                else:
+                    vo2 = None
+        except Exception:
+            pass
+        if vo2 is None:
+            # Fall back to cached garmin_latest.json
+            latest_path = self.data_dir / "garmin_latest.json"
+            if latest_path.exists():
+                try:
+                    with open(latest_path) as f:
+                        vo2 = json.load(f).get("vo2_max")
+                except Exception:
+                    pass
+
+        # Zone 2 (from activities, 1 API call)
+        zone2 = self.pull_zone2_minutes()
+
+        # Compute averages from local series
+        avgs = self._compute_averages(series)
+        avgs["vo2_max"] = vo2
+        avgs["zone2_min_per_week"] = zone2
+
+        # Build garmin_latest.json (same schema as before)
+        garmin_data = {
+            "last_updated": datetime.now().isoformat(timespec="seconds"),
+            **avgs,
+            "today": {
+                "date": today_str,
+                "steps": snapshot.get("steps"),
+                "rhr": snapshot.get("rhr"),
+                "hrv_last_night": snapshot.get("hrv"),
+                "hrv_weekly_avg": snapshot.get("hrv_weekly_avg"),
+                "sleep_hrs": snapshot.get("sleep_hrs"),
+                "deep_sleep_hrs": snapshot.get("deep_sleep_hrs"),
+                "rem_sleep_hrs": snapshot.get("rem_sleep_hrs"),
+                "calories_total": snapshot.get("calories_total"),
+                "calories_active": snapshot.get("calories_active"),
+                "stress_avg": snapshot.get("stress_avg"),
+            },
+        }
+
         out_path = self.data_dir / "garmin_latest.json"
-        metric_keys = [k for k in garmin_data if k != "last_updated"]
-        filled = sum(1 for k in metric_keys if garmin_data[k] is not None)
+        with open(out_path, "w") as f:
+            json.dump(garmin_data, f, indent=2)
+        print(f"\nSaved to {out_path}")
 
-        if filled > 0:
-            with open(out_path, "w") as f:
-                json.dump(garmin_data, f, indent=2)
-            print(f"\nSaved to {out_path}")
-        else:
-            print(f"\nNo metrics retrieved — keeping existing {out_path.name} unchanged.")
+        metric_keys = [k for k in avgs if avgs[k] is not None]
+        print(f"{len(metric_keys)}/{len(avgs)} averages computed from {len(series)} days of history.")
 
-        print(f"\n{filled}/{len(metric_keys)} metrics pulled successfully.")
-
-        missing = [k for k in metric_keys if garmin_data[k] is None]
-        if missing:
-            print(f"Missing: {', '.join(missing)}")
-
-        # Daily calorie burn
-        burns = self.pull_daily_burn()
-        if burns:
-            burn_path = self.data_dir / "garmin_daily_burn.json"
-            with open(burn_path, "w") as f:
-                json.dump(burns, f, indent=2)
-
-        # Workouts
+        # Workouts (on-demand, separate API calls)
         if workouts:
             workout_list = self.pull_workouts(days=workout_days)
             if workout_list:
                 workouts_path = self.data_dir / "garmin_workouts.json"
-                # Merge with existing
                 existing = []
                 if workouts_path.exists():
                     try:
@@ -696,19 +887,18 @@ class GarminClient:
                     json.dump(existing, f, indent=2)
                 print(f"  Saved {len(existing)} workouts to {workouts_path.name}")
 
-        # Historical daily series
+        # Historical backfill (only when explicitly requested)
         if history:
-            series = self.pull_daily_series(days=history_days)
-            series_path = self.data_dir / "garmin_daily.json"
-            has_any_data = any(
-                e.get("rhr") is not None or e.get("hrv") is not None or e.get("sleep_hrs") is not None
-                for e in series
-            )
-            if has_any_data:
-                with open(series_path, "w") as f:
-                    json.dump(series, f, indent=2)
-                print(f"Saved daily series to {series_path}")
-            else:
-                print(f"No daily data retrieved — keeping existing {series_path.name} unchanged.")
+            print(f"\n  Backfilling {history_days}-day daily series...")
+            for i in range(1, history_days):
+                d = (date.today() - timedelta(days=i)).isoformat()
+                # Skip dates we already have
+                existing_dates = {e["date"] for e in series}
+                if d in existing_dates:
+                    continue
+                day_data = self._pull_day_snapshot(d)
+                series = self._append_to_daily_series(day_data)
+                time.sleep(0.3)
+            print(f"  Backfill complete: {len(series)} days in series.")
 
         return garmin_data
