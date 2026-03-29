@@ -654,7 +654,7 @@ def _load_weight_log(data_dir: Path) -> Optional[list]:
     rows = read_csv(path)
     weights = [
         {"weight": float(r["weight_lbs"]), "date": r["date"]}
-        for r in rows if r.get("weight_lbs")
+        for r in rows if r.get("weight_lbs") and r["weight_lbs"].strip()
     ]
     return weights if weights else None
 
@@ -666,7 +666,7 @@ def _load_bp_log(data_dir: Path) -> Optional[list]:
     rows = read_csv(path)
     readings = [
         {"sys": float(r["systolic"]), "dia": float(r["diastolic"])}
-        for r in rows if r.get("systolic")
+        for r in rows if r.get("systolic") and r["systolic"].strip()
     ]
     return readings if readings else None
 

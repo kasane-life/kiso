@@ -250,12 +250,12 @@ def _score(user_id: str | None = None) -> dict:
                 setattr(profile, attr, val)
 
     bp_rows = read_csv(data_dir / "bp_log.csv")
-    if bp_rows:
+    if bp_rows and bp_rows[-1].get("systolic", "").strip():
         profile.systolic = float(bp_rows[-1]["systolic"])
         profile.diastolic = float(bp_rows[-1]["diastolic"])
 
     weight_rows = read_csv(data_dir / "weight_log.csv")
-    if weight_rows and weight_rows[-1].get("weight_lbs"):
+    if weight_rows and weight_rows[-1].get("weight_lbs", "").strip():
         profile.weight_lbs = float(weight_rows[-1]["weight_lbs"])
 
     # Load lab results for scoring + clinical zones
@@ -682,12 +682,12 @@ def _onboard(user_id: str | None = None) -> dict:
                 setattr(profile, attr, val)
 
     bp_rows = read_csv(data_dir / "bp_log.csv")
-    if bp_rows:
+    if bp_rows and bp_rows[-1].get("systolic", "").strip():
         profile.systolic = float(bp_rows[-1]["systolic"])
         profile.diastolic = float(bp_rows[-1]["diastolic"])
 
     weight_rows = read_csv(data_dir / "weight_log.csv")
-    if weight_rows and weight_rows[-1].get("weight_lbs"):
+    if weight_rows and weight_rows[-1].get("weight_lbs", "").strip():
         profile.weight_lbs = float(weight_rows[-1]["weight_lbs"])
 
     lab_path = data_dir / "lab_results.json"
