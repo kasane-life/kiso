@@ -312,19 +312,32 @@ def _checkin(greeting: str = "morning check-in", user_id: str | None = None) -> 
     from engine.coaching.briefing import build_briefing
 
     # Pull fresh Garmin data before building the briefing
+    garmin_pull_error = None
     try:
         from engine.integrations.garmin import GarminClient
         config_pre = _load_config(user_id)
         garmin_cfg = config_pre.get("garmin", {})
         if GarminClient.has_tokens(token_dir=garmin_cfg.get("token_dir")):
-            _pull_garmin(user_id=user_id)
-    except Exception:
-        pass  # Garmin pull is best-effort, don't block check-in
+            result = _pull_garmin(user_id=user_id)
+            if not result.get("pulled"):
+                garmin_pull_error = result.get("error", "Unknown error")
+    except Exception as e:
+        garmin_pull_error = str(e)
 
     config = _load_config(user_id)
     if user_id and user_id != "default":
         config["data_dir"] = str(_data_dir(user_id))
-    return build_briefing(config)
+    briefing = build_briefing(config)
+
+    if garmin_pull_error:
+        briefing["garmin_pull_failed"] = True
+        briefing["garmin_pull_error"] = garmin_pull_error
+        # Flag staleness
+        garmin_data = briefing.get("garmin", {})
+        if garmin_data.get("last_updated"):
+            briefing["garmin_stale_warning"] = f"WARNING: Garmin data is stale (last updated {garmin_data["last_updated"]}). Pull failed: {garmin_pull_error}. Sleep, HR, HRV, steps may not reflect last night."
+
+    return briefing
 
 
 def _score(user_id: str | None = None) -> dict:
