@@ -19,6 +19,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 import yaml
 from engine.utils.csv_io import read_csv, write_csv, append_csv
+from engine.db_read import get_weights, get_bp, get_meals, get_habits, get_labs, get_strength, get_wearable_daily
 
 # User home directory for pip-installed (uvx) usage
 _USER_HOME = Path(os.path.expanduser("~/.config/health-engine"))
@@ -374,7 +375,7 @@ def _score(user_id: str | None = None) -> dict:
     if bp:
         profile.systolic, profile.diastolic = bp
     else:
-        bp_rows = read_csv(data_dir / "bp_log.csv")
+        bp_rows = get_bp(user_id, data_dir)
         if bp_rows and bp_rows[-1].get("systolic", "").strip():
             profile.systolic = float(bp_rows[-1]["systolic"])
             profile.diastolic = float(bp_rows[-1]["diastolic"])
@@ -383,7 +384,7 @@ def _score(user_id: str | None = None) -> dict:
     if wt is not None:
         profile.weight_lbs = wt
     else:
-        weight_rows = read_csv(data_dir / "weight_log.csv")
+        weight_rows = get_weights(user_id, data_dir)
         if weight_rows and weight_rows[-1].get("weight_lbs", "").strip():
             profile.weight_lbs = float(weight_rows[-1]["weight_lbs"])
 
@@ -469,7 +470,7 @@ def _get_protocols(user_id: str | None = None) -> list[dict]:
         return [{"message": "No active protocols in config.yaml focus list."}]
 
     data_dir = _data_dir(user_id)
-    habit_data = read_csv(data_dir / "daily_habits.csv") or None
+    habit_data = get_habits(user_id, data_dir=data_dir) or None
 
     garmin = None
     garmin_path = data_dir / "garmin_latest.json"
@@ -782,7 +783,7 @@ def _get_meals(
         if _mrows:
             rows = [dict(r) for r in _mrows]
     if rows is None:
-        rows = read_csv(data_dir / "meal_log.csv")
+        rows = get_meals(user_id, data_dir=data_dir)
 
     # Load burns from SQLite wearable_daily, JSON fallback
     burn_by_date = {}
@@ -960,7 +961,7 @@ def _onboard(user_id: str | None = None) -> dict:
     if bp:
         profile.systolic, profile.diastolic = bp
     else:
-        bp_rows = read_csv(data_dir / "bp_log.csv")
+        bp_rows = get_bp(user_id, data_dir)
         if bp_rows and bp_rows[-1].get("systolic", "").strip():
             profile.systolic = float(bp_rows[-1]["systolic"])
             profile.diastolic = float(bp_rows[-1]["diastolic"])
@@ -969,7 +970,7 @@ def _onboard(user_id: str | None = None) -> dict:
     if wt is not None:
         profile.weight_lbs = wt
     else:
-        weight_rows = read_csv(data_dir / "weight_log.csv")
+        weight_rows = get_weights(user_id, data_dir)
         if weight_rows and weight_rows[-1].get("weight_lbs", "").strip():
             profile.weight_lbs = float(weight_rows[-1]["weight_lbs"])
 
@@ -1504,8 +1505,7 @@ def _get_daily_snapshot(user_id: str | None = None) -> dict:
     except Exception as e:
         garmin_snapshot = {"error": str(e)}
 
-    path = data_dir / "meal_log.csv"
-    rows = read_csv(path)
+    rows = get_meals(user_id, data_dir=data_dir)
     day_meals = [r for r in rows if r.get("date") == today]
     totals = daily_totals(day_meals) if day_meals else {"protein_g": 0, "calories": 0}
 
@@ -2211,7 +2211,7 @@ def _check_health_priorities_tool(user_id: str | None = None) -> dict:
     if bp:
         bp_systolic, bp_diastolic = bp
     else:
-        bp_rows = read_csv(data_dir / "bp_log.csv")
+        bp_rows = get_bp(user_id, data_dir)
         if bp_rows:
             try:
                 bp_systolic = float(bp_rows[-1]["systolic"])
@@ -2555,7 +2555,7 @@ def _get_person_context(person_id: str | None = None, user_id: str | None = None
     if weight_rows:
         health["weight_recent"] = [dict(r) for r in reversed(weight_rows)]
     elif he_uid:
-        csv_rows = read_csv(_data_dir(he_uid) / "weight_log.csv")
+        csv_rows = get_weights(he_uid, _data_dir(he_uid))
         if csv_rows:
             health["weight_recent"] = csv_rows[-14:]
 
@@ -2602,7 +2602,7 @@ def _get_person_context(person_id: str | None = None, user_id: str | None = None
     if meal_rows:
         health["meals_today"] = [dict(r) for r in meal_rows]
     elif he_uid:
-        csv_rows = read_csv(_data_dir(he_uid) / "meal_log.csv")
+        csv_rows = get_meals(he_uid, data_dir=_data_dir(he_uid))
         if csv_rows:
             health["meals_today"] = [r for r in csv_rows if r.get("date") == today]
 
