@@ -817,7 +817,7 @@ def _get_meals(
         day_meals = [r for r in rows if r.get("date") == d]
         if day_meals:
             totals = daily_totals(day_meals)
-            day_result = {"meals": day_meals, "totals": totals}
+            day_result = {"data_source": {"meals": _meal_source, "burns": _burn_source}, "meals": day_meals, "totals": totals}
 
             config = _load_config(user_id)
             targets = config.get("targets", {})
@@ -870,7 +870,6 @@ def _get_meals(
 
         result[d] = day_result
 
-    result["data_source"] = {"meals": _meal_source, "burns": _burn_source}
     return result
 
 
