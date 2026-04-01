@@ -38,6 +38,10 @@ rsync -az --delete \
     --exclude='*.pyc' \
     "$LOCAL_DIR/mcp_server/" "$REMOTE:$REMOTE_DIR/mcp_server/"
 
+rsync -az --delete \
+    --exclude='__pycache__' \
+    "$LOCAL_DIR/dashboard/" "$REMOTE:$REMOTE_DIR/dashboard/"
+
 rsync -az \
     "$LOCAL_DIR/scripts/restart-api.sh" "$REMOTE:$REMOTE_DIR/scripts/restart-api.sh"
 rsync -az \

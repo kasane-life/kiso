@@ -3,15 +3,24 @@ set -euo pipefail
 
 # Restart the Kiso API cleanly. Handles launchd KeepAlive respawn race.
 #
+# Single process: com.baseline.gateway on port 18800.
+# Runs python3 -m engine.gateway (server.py) which serves everything:
+#   - /api/* (Milo MCP tool dispatch)
+#   - /api/v1/* (Kasane iOS sync)
+#   - /auth/* (Garmin, Google OAuth)
+#   - /dashboard/* (static member dashboard)
+#   - /health, /health/deep (monitoring)
+#
 # Usage (local on Mac Mini):
 #   ./scripts/restart-api.sh
 #
 # Usage (remote from laptop):
 #   ssh mac-mini 'cd ~/src/health-engine && bash scripts/restart-api.sh'
 
-SERVICE="com.kiso.v1api"
+SERVICE="com.baseline.gateway"
+PLIST="$HOME/Library/LaunchAgents/${SERVICE}.plist"
 PORT=18800
-LOG="/tmp/kiso-v1.log"
+LOG="/tmp/baseline-gateway.log"
 
 echo "Stopping $SERVICE..."
 
@@ -40,13 +49,14 @@ fi
 
 # Step 4: Clear Python bytecode cache for gateway module
 find ~/src/health-engine/engine/gateway/__pycache__ -name "*.pyc" -delete 2>/dev/null || true
+find ~/src/health-engine/mcp_server/__pycache__ -name "*.pyc" -delete 2>/dev/null || true
 
 # Step 5: Re-bootstrap the service (loads fresh code)
 echo "Starting $SERVICE..."
-launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/${SERVICE}.plist 2>/dev/null || {
+launchctl bootstrap "gui/$(id -u)" "$PLIST" 2>/dev/null || {
     echo "Bootstrap failed. Starting manually..."
     cd ~/src/health-engine
-    nohup .venv/bin/python3 scripts/run_v1_api.py > "$LOG" 2>&1 &
+    nohup .venv/bin/python3 -m engine.gateway > "$LOG" 2>&1 &
 }
 
 # Step 6: Wait for API to come up

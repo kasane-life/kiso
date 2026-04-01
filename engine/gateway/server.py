@@ -57,6 +57,15 @@ def create_app(config: GatewayConfig | None = None) -> "FastAPI":
         config = load_gateway_config()
 
     app = FastAPI(title="Health Engine Gateway", docs_url=None, redoc_url=None)
+
+    from fastapi.middleware.cors import CORSMiddleware
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
     token_store = TokenStore()
 
     # --- Static files (dashboard) ---
@@ -901,9 +910,11 @@ def _error_page(message: str) -> str:
 def run_gateway(config: GatewayConfig | None = None):
     """Start the gateway server (blocking)."""
     import uvicorn
+    from .db import init_db
 
     if config is None:
         config = load_gateway_config()
+    init_db()
     app = create_app(config)
     print(f"Health Engine Gateway starting on port {config.port}")
     if config.tunnel_domain:
