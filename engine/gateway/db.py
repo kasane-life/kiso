@@ -65,6 +65,8 @@ CREATE TABLE IF NOT EXISTS person (
     family_history_json TEXT DEFAULT '[]',
     health_notes TEXT,
     health_engine_user_id TEXT,
+    channel TEXT,
+    channel_target TEXT,
     wearables_json TEXT DEFAULT '[]',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
@@ -354,10 +356,18 @@ def init_db(db_path: Path | str | None = None):
 
 def _migrate(conn: sqlite3.Connection):
     """Safe migrations for existing databases. Each is idempotent."""
-    # Add wearables_json to person if missing (added 2026-04-01)
     cols = {row[1] for row in conn.execute("PRAGMA table_info(person)").fetchall()}
+    dirty = False
     if "wearables_json" not in cols:
         conn.execute("ALTER TABLE person ADD COLUMN wearables_json TEXT DEFAULT '[]'")
+        dirty = True
+    if "channel" not in cols:
+        conn.execute("ALTER TABLE person ADD COLUMN channel TEXT")
+        dirty = True
+    if "channel_target" not in cols:
+        conn.execute("ALTER TABLE person ADD COLUMN channel_target TEXT")
+        dirty = True
+    if dirty:
         conn.commit()
 
 
@@ -387,7 +397,8 @@ TABLE_COLUMNS = {
     "person": [
         "name", "relationship", "date_of_birth", "biological_sex",
         "conditions_json", "medications", "family_history_json",
-        "health_notes", "health_engine_user_id", "wearables_json",
+        "health_notes", "health_engine_user_id", "channel", "channel_target",
+        "wearables_json",
     ],
     "wearable_token": [
         "person_id", "user_id", "service", "token_name", "token_data",

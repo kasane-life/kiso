@@ -2747,6 +2747,75 @@ def _get_family_summary(person_id: str) -> dict:
 
 
 # =====================================================================
+# Messaging
+# =====================================================================
+
+
+def _send_message(channel: str, user_id: str, message: str) -> dict:
+    """Send a message to a user via Telegram.
+
+    Args:
+        channel: 'telegram' (only supported channel currently)
+        user_id: health-engine user_id (looks up chat_id from person table)
+        message: text to send
+    """
+    import requests as _requests
+
+    if not message:
+        return {"error": "No message provided"}
+    if not user_id:
+        return {"error": "user_id is required"}
+    if channel != "telegram":
+        return {"error": f"Unsupported channel: {channel}. Only 'telegram' is supported."}
+
+    # Look up channel_target from SQLite
+    from engine.gateway.db import get_db, init_db
+    init_db()
+    db = get_db()
+    row = db.execute(
+        "SELECT channel, channel_target, name FROM person WHERE health_engine_user_id = ? AND deleted_at IS NULL",
+        (user_id,),
+    ).fetchone()
+
+    if not row:
+        return {"error": f"User '{user_id}' not found in person table"}
+
+    chat_id = row["channel_target"]
+    if not chat_id:
+        return {"error": f"No channel_target set for user '{user_id}'. Update the person record with their Telegram chat_id."}
+
+    # Get bot token from OpenClaw config
+    openclaw_json = Path(os.path.expanduser("~/.openclaw/openclaw.json"))
+    if not openclaw_json.exists():
+        return {"error": "openclaw.json not found"}
+
+    with open(openclaw_json) as f:
+        oc = json.load(f)
+
+    bot_token = oc.get("channels", {}).get("telegram", {}).get("botToken", "")
+    if not bot_token:
+        return {"error": "Telegram bot token not configured"}
+
+    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+    resp = _requests.post(url, json={
+        "chat_id": chat_id,
+        "text": message,
+        "disable_web_page_preview": True,
+    }, timeout=10)
+
+    if resp.status_code == 200:
+        result = resp.json()
+        return {
+            "status": "sent",
+            "channel": "telegram",
+            "user_id": user_id,
+            "message_id": result.get("result", {}).get("message_id"),
+        }
+    else:
+        return {"status": "error", "error": resp.text[:300], "http_status": resp.status_code}
+
+
+# =====================================================================
 # Tool registry for HTTP API access
 # =====================================================================
 
@@ -2793,6 +2862,7 @@ TOOL_REGISTRY = {
     "log_coach_task": _log_coach_task,
     "get_coach_tasks": _get_coach_tasks,
     "complete_coach_task": _complete_coach_task,
+    "send_message": _send_message,
     # Excluded from HTTP: auth_garmin (interactive), auth_oura (interactive),
     # auth_whoop (interactive), open_dashboard (browser)
 }
