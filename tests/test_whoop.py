@@ -397,8 +397,14 @@ class TestPagination:
 
 
 class TestWhoopTokenStorage:
-    def test_save_and_load(self, tmp_path):
+    def test_save_and_load(self, tmp_path, monkeypatch):
         from engine.gateway.token_store import TokenStore
+        from engine.gateway.db import init_db, close_db, get_db
+        close_db()
+        db_path = tmp_path / "test.db"
+        init_db(db_path)
+        monkeypatch.setattr("engine.gateway.token_store._get_db", lambda: get_db(db_path))
+
         store = TokenStore(base_dir=tmp_path)
         store._fernet = None
 
@@ -413,15 +419,23 @@ class TestWhoopTokenStorage:
         store.save_token("whoop", "testuser", token_data)
         loaded = store.load_token("whoop", "testuser")
         assert loaded == token_data
+        close_db()
 
-    def test_token_path(self, tmp_path):
+    def test_has_token(self, tmp_path, monkeypatch):
         from engine.gateway.token_store import TokenStore
+        from engine.gateway.db import init_db, close_db, get_db
+        close_db()
+        db_path = tmp_path / "test.db"
+        init_db(db_path)
+        monkeypatch.setattr("engine.gateway.token_store._get_db", lambda: get_db(db_path))
+
         store = TokenStore(base_dir=tmp_path)
         store._fernet = None
 
+        assert not store.has_token("whoop", "paul")
         store.save_token("whoop", "paul", {"access_token": "t"})
-        token_file = tmp_path / "whoop" / "paul" / "token.json"
-        assert token_file.exists()
+        assert store.has_token("whoop", "paul")
+        close_db()
 
 
 # =====================================================================

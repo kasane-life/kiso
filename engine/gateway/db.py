@@ -65,6 +65,7 @@ CREATE TABLE IF NOT EXISTS person (
     family_history_json TEXT DEFAULT '[]',
     health_notes TEXT,
     health_engine_user_id TEXT,
+    wearables_json TEXT DEFAULT '[]',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     deleted_at TEXT
@@ -307,6 +308,20 @@ CREATE TABLE IF NOT EXISTS habit_log (
     updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS wearable_token (
+    id TEXT PRIMARY KEY,
+    person_id TEXT REFERENCES person(id),
+    user_id TEXT NOT NULL,
+    service TEXT NOT NULL,
+    token_name TEXT NOT NULL,
+    token_data BLOB NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_wearable_token_user_service_name
+    ON wearable_token(user_id, service, token_name);
+
 -- Indexes: existing
 CREATE INDEX IF NOT EXISTS idx_habit_person ON habit(person_id);
 CREATE INDEX IF NOT EXISTS idx_checkin_habit ON check_in(habit_id);
@@ -330,10 +345,20 @@ CREATE INDEX IF NOT EXISTS idx_habit_log_person_date ON habit_log(person_id, dat
 
 
 def init_db(db_path: Path | str | None = None):
-    """Create all tables if they don't exist."""
+    """Create all tables if they don't exist, then run migrations."""
     conn = get_db(db_path)
     conn.executescript(_SCHEMA)
     conn.commit()
+    _migrate(conn)
+
+
+def _migrate(conn: sqlite3.Connection):
+    """Safe migrations for existing databases. Each is idempotent."""
+    # Add wearables_json to person if missing (added 2026-04-01)
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(person)").fetchall()}
+    if "wearables_json" not in cols:
+        conn.execute("ALTER TABLE person ADD COLUMN wearables_json TEXT DEFAULT '[]'")
+        conn.commit()
 
 
 # Entity name -> table name mapping (used by sync)
@@ -351,6 +376,7 @@ ENTITY_TABLES = {
     "training_session": "training_session",
     "strength_set": "strength_set",
     "wearable_daily": "wearable_daily",
+    "wearable_token": "wearable_token",
     "lab_draw": "lab_draw",
     "lab_result": "lab_result",
     "habit_log": "habit_log",
@@ -361,7 +387,10 @@ TABLE_COLUMNS = {
     "person": [
         "name", "relationship", "date_of_birth", "biological_sex",
         "conditions_json", "medications", "family_history_json",
-        "health_notes", "health_engine_user_id",
+        "health_notes", "health_engine_user_id", "wearables_json",
+    ],
+    "wearable_token": [
+        "person_id", "user_id", "service", "token_name", "token_data",
     ],
     "habit": [
         "person_id", "title", "purpose", "category", "emoji", "anchor",

@@ -123,17 +123,30 @@ def _latest_labs_sqlite(person_id: str | None) -> dict | None:
         return None
 
 
+def _get_token_store():
+    """Get the shared TokenStore instance."""
+    from engine.gateway.token_store import TokenStore
+    return TokenStore()
+
+
 def _garmin_token_dir(user_id: str | None = None) -> str | None:
     """Resolve per-user Garmin token directory. Returns None if no tokens exist.
 
-    NEVER falls back to another user's tokens. Each user must authenticate independently.
+    Uses SQLite-backed TokenStore (with automatic migration from legacy files).
+    NEVER falls back to another user's tokens.
     """
-    if user_id and user_id != "default":
-        user_path = Path(os.path.expanduser("~/.config/health-engine/tokens/garmin")) / user_id
-        if user_path.exists() and any(user_path.iterdir()):
-            return str(user_path)
-        return None  # No tokens for this user
-    # Legacy CLI path (no user_id context, e.g. direct CLI usage)
+    ts = _get_token_store()
+    uid = user_id if user_id and user_id != "default" else "default"
+
+    if uid != "default":
+        if ts.has_token("garmin", uid):
+            return str(ts.garmin_token_dir(uid))
+        return None
+
+    # Legacy CLI path (no user_id context)
+    if ts.has_token("garmin", "default"):
+        return str(ts.garmin_token_dir("default"))
+    # Check old-style legacy path as absolute fallback for CLI
     legacy = Path(os.path.expanduser("~/.config/health-engine/garmin-tokens"))
     if legacy.exists() and any(legacy.iterdir()):
         return str(legacy)
@@ -1149,6 +1162,10 @@ def _pull_garmin(history: bool = False, workouts: bool = False, user_id: str | N
             workout_days=7,
             person_id=person_id,
         )
+        # Sync any token refreshes back to SQLite
+        uid = user_id if user_id and user_id != "default" else "default"
+        _get_token_store().sync_garmin_tokens(uid)
+
         from engine.coaching.briefing import build_briefing
         briefing = build_briefing(config)
         data_dir = Path(config.get("data_dir", "./data"))

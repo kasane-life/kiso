@@ -1,4 +1,4 @@
-"""Tests for TokenStore encryption."""
+"""Tests for TokenStore encryption and SQLite storage."""
 
 import json
 import os
@@ -18,28 +18,37 @@ def key_path(tmp_path):
 
 
 @pytest.fixture
-def store_encrypted(token_dir, key_path, monkeypatch):
+def test_db(tmp_path, monkeypatch):
+    """Set up a test SQLite DB and patch _get_db to use it."""
+    from engine.gateway.db import init_db, close_db, get_db
+    close_db()
+    db_path = tmp_path / "test.db"
+    init_db(db_path)
+    monkeypatch.setattr(
+        "engine.gateway.token_store._get_db",
+        lambda: get_db(db_path),
+    )
+    yield db_path
+    close_db()
+
+
+@pytest.fixture
+def store_encrypted(token_dir, key_path, test_db, monkeypatch):
     """TokenStore with Fernet encryption enabled."""
-    monkeypatch.setattr("engine.gateway.token_store._BASE_DIR", token_dir)
+    monkeypatch.setattr("engine.gateway.token_store._LEGACY_BASE_DIR", token_dir)
     monkeypatch.setattr("engine.gateway.token_store._KEY_PATH", key_path)
-    # Clear any env var so key is auto-generated
     monkeypatch.delenv("HE_TOKEN_KEY", raising=False)
     from engine.gateway.token_store import TokenStore
     return TokenStore(base_dir=token_dir)
 
 
 @pytest.fixture
-def store_no_crypto(token_dir, monkeypatch):
+def store_no_crypto(token_dir, test_db, monkeypatch):
     """TokenStore with cryptography unavailable."""
-    monkeypatch.setattr("engine.gateway.token_store._BASE_DIR", token_dir)
+    monkeypatch.setattr("engine.gateway.token_store._LEGACY_BASE_DIR", token_dir)
 
     import engine.gateway.token_store as mod
-    original = mod._get_fernet
-
-    def _no_fernet():
-        return None
-
-    monkeypatch.setattr(mod, "_get_fernet", _no_fernet)
+    monkeypatch.setattr(mod, "_get_fernet", lambda: None)
     from engine.gateway.token_store import TokenStore
     store = TokenStore(base_dir=token_dir)
     store._fernet = None
@@ -59,18 +68,24 @@ def test_encrypt_decrypt_roundtrip(store_encrypted):
     assert loaded == data
 
 
-def test_encrypted_file_is_not_plaintext(store_encrypted, token_dir):
-    """The raw file on disk should not contain plaintext tokens."""
+def test_encrypted_blob_is_not_plaintext(store_encrypted, test_db):
+    """The token_data in SQLite should not contain plaintext tokens."""
+    from engine.gateway.db import get_db
     data = {"access_token": "ya29.plaintext_check", "refresh_token": "1//0refresh"}
     store_encrypted.save_token("google-calendar", "testuser", data)
 
-    raw = (token_dir / "google-calendar" / "testuser" / "token.json").read_bytes()
+    db = get_db(test_db)
+    row = db.execute(
+        "SELECT token_data FROM wearable_token WHERE user_id = 'testuser' AND service = 'google-calendar'"
+    ).fetchone()
+    assert row is not None
+    raw = row["token_data"]
     assert b"ya29.plaintext_check" not in raw
     assert raw.startswith(b"gAAAAA")  # Fernet prefix
 
 
-def test_backward_compat_plaintext_load(store_encrypted, token_dir):
-    """Plaintext JSON files from before encryption can still be loaded."""
+def test_legacy_file_migration(store_encrypted, token_dir):
+    """Plaintext JSON files from before SQLite migration can be loaded via migration."""
     td = token_dir / "google-calendar" / "legacy"
     td.mkdir(parents=True)
     data = {"access_token": "old_token", "refresh_token": "old_refresh"}
@@ -80,13 +95,10 @@ def test_backward_compat_plaintext_load(store_encrypted, token_dir):
     assert loaded == data
 
 
-def test_no_crypto_saves_plaintext(store_no_crypto, token_dir):
-    """Without cryptography, tokens are saved as plaintext JSON."""
+def test_no_crypto_roundtrip(store_no_crypto):
+    """Without cryptography, tokens still save and load via SQLite."""
     data = {"access_token": "plain", "refresh_token": "text"}
     store_no_crypto.save_token("test-service", "user1", data)
-
-    raw = (token_dir / "test-service" / "user1" / "token.json").read_bytes()
-    assert b"plain" in raw
     loaded = store_no_crypto.load_token("test-service", "user1")
     assert loaded == data
 
@@ -104,7 +116,7 @@ def test_load_missing_returns_none(store_encrypted):
 
 def test_key_auto_generated(key_path, token_dir, monkeypatch):
     """Key file is auto-generated on first use."""
-    monkeypatch.setattr("engine.gateway.token_store._BASE_DIR", token_dir)
+    monkeypatch.setattr("engine.gateway.token_store._LEGACY_BASE_DIR", token_dir)
     monkeypatch.setattr("engine.gateway.token_store._KEY_PATH", key_path)
     monkeypatch.delenv("HE_TOKEN_KEY", raising=False)
 
@@ -113,7 +125,6 @@ def test_key_auto_generated(key_path, token_dir, monkeypatch):
     f = _get_fernet()
     assert f is not None
     assert key_path.exists()
-    # Key file should be 600 permissions
     mode = oct(key_path.stat().st_mode)[-3:]
     assert mode == "600"
 
@@ -123,11 +134,10 @@ def test_env_var_key(token_dir, monkeypatch):
     from cryptography.fernet import Fernet
     key = Fernet.generate_key()
     monkeypatch.setenv("HE_TOKEN_KEY", key.decode())
-    monkeypatch.setattr("engine.gateway.token_store._BASE_DIR", token_dir)
+    monkeypatch.setattr("engine.gateway.token_store._LEGACY_BASE_DIR", token_dir)
 
     from engine.gateway.token_store import _get_fernet
     f = _get_fernet()
     assert f is not None
-    # Verify it works
     ct = f.encrypt(b"test")
     assert f.decrypt(ct) == b"test"

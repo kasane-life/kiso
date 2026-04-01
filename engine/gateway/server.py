@@ -284,22 +284,32 @@ def create_app(config: GatewayConfig | None = None) -> "FastAPI":
 
         checks["user_data"] = user_freshness
 
-        # 3. Garmin tokens (per-user)
-        garmin_tokens_base = Path.home() / ".config" / "health-engine" / "tokens" / "garmin"
+        # 3. Garmin tokens (per-user, from SQLite)
         garmin_status = {}
-        if garmin_tokens_base.exists():
-            for user_dir in sorted(garmin_tokens_base.iterdir()):
-                if not user_dir.is_dir() or user_dir.is_symlink():
-                    continue
-                token_file = user_dir / "oauth2_token.json"
-                if token_file.exists():
-                    age_hours = (time.time() - token_file.stat().st_mtime) / 3600
-                    garmin_status[user_dir.name] = {
-                        "status": "ok" if age_hours < 168 else "stale",
-                        "age_hours": round(age_hours, 1),
-                    }
+        try:
+            from .db import get_db
+            db = get_db()
+            rows = db.execute(
+                "SELECT user_id, MAX(updated_at) as last_updated FROM wearable_token WHERE service = 'garmin' GROUP BY user_id"
+            ).fetchall()
+            for row in rows:
+                uid = row["user_id"]
+                last = row["last_updated"]
+                if last:
+                    from datetime import datetime as _dt, timezone as _tz
+                    try:
+                        updated = _dt.fromisoformat(last.replace("Z", "+00:00"))
+                        age_hours = (_dt.now(_tz.utc) - updated).total_seconds() / 3600
+                        garmin_status[uid] = {
+                            "status": "ok" if age_hours < 168 else "stale",
+                            "age_hours": round(age_hours, 1),
+                        }
+                    except Exception:
+                        garmin_status[uid] = {"status": "ok"}
                 else:
-                    garmin_status[user_dir.name] = {"status": "no_oauth2_token"}
+                    garmin_status[uid] = {"status": "ok"}
+        except Exception:
+            garmin_status = {"status": "db_error"}
         checks["garmin_tokens"] = garmin_status if garmin_status else {"status": "no_users_connected"}
 
         # 4. Apple Health per-user freshness
@@ -601,12 +611,13 @@ def _do_garmin_auth(email: str, password: str, token_store: TokenStore, user_id:
 
         td = token_store.garmin_token_dir(user_id)
         client.garth.dump(str(td))
+        # Sync garth's token files back into SQLite
+        token_store.sync_garmin_tokens(user_id)
 
         logger.info("garmin_auth success user_id=%s", user_id)
         return {
             "authenticated": True,
             "user_id": user_id,
-            "token_dir": str(td),
         }
     except Exception as e:
         raw_error = str(e)
