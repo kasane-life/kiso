@@ -604,6 +604,95 @@ def create_app(config: GatewayConfig | None = None) -> "FastAPI":
 
         return HTMLResponse(_google_success_page(user_id))
 
+    # --- MCP streamable-http transport ---
+    # Exposes the health-engine MCP tools over HTTP so remote clients
+    # (e.g. Paul via mcp-remote) can connect through Cloudflare Tunnel.
+    try:
+        from mcp_server.tools import register_tools, register_resources
+        from mcp.server.fastmcp import FastMCP
+        from starlette.middleware import Middleware as StarletteMiddleware
+        from starlette.requests import Request as StarletteRequest
+        from starlette.responses import Response as StarletteResponse, JSONResponse as StarletteJSONResponse
+
+        from mcp.server.transport_security import TransportSecuritySettings
+
+        # Allow the Cloudflare Tunnel domain + localhost for MCP connections
+        allowed_hosts = ["localhost", "127.0.0.1"]
+        if config.tunnel_domain:
+            allowed_hosts.append(config.tunnel_domain)
+
+        mcp_server = FastMCP(
+            "Health Engine",
+            instructions=(
+                "Health Engine is a local-first health intelligence system. "
+                "When the user asks about their health, wants a check-in, or mentions health data, "
+                "call `checkin` first. Coach from the data: lead with what matters, connect metrics, "
+                "give 1-2 nudges. Never dump raw JSON."
+            ),
+            streamable_http_path="/",
+            transport_security=TransportSecuritySettings(
+                enable_dns_rebinding_protection=True,
+                allowed_hosts=allowed_hosts,
+            ),
+        )
+        register_tools(mcp_server)
+        register_resources(mcp_server)
+
+        # Auth middleware: require a valid API token on every MCP request
+        class MCPAuthMiddleware:
+            def __init__(self, app):
+                self.app = app
+
+            async def __call__(self, scope, receive, send):
+                if scope["type"] == "http":
+                    request = StarletteRequest(scope, receive)
+                    token = None
+                    auth = request.headers.get("authorization", "")
+                    if auth.startswith("Bearer "):
+                        token = auth[7:]
+                    if not token:
+                        # Check query param as fallback
+                        token = request.query_params.get("token")
+                    # Validate against gateway config
+                    valid = False
+                    if token:
+                        if config.api_token and token == config.api_token:
+                            valid = True
+                        elif token in config.token_persons:
+                            valid = True
+                    if not valid:
+                        response = StarletteJSONResponse(
+                            {"error": "Invalid or missing token"}, status_code=403
+                        )
+                        await response(scope, receive, send)
+                        return
+                await self.app(scope, receive, send)
+
+        mcp_app = mcp_server.streamable_http_app()
+
+        # Start the MCP session manager via the FastAPI lifespan
+        from contextlib import asynccontextmanager
+
+        original_router_lifespan = app.router.lifespan_context
+
+        @asynccontextmanager
+        async def combined_lifespan(a):
+            async with mcp_server.session_manager.run():
+                if original_router_lifespan:
+                    async with original_router_lifespan(a) as state:
+                        yield state
+                else:
+                    yield
+
+        app.router.lifespan_context = combined_lifespan
+
+        # Wrap with auth
+        authed_mcp_app = MCPAuthMiddleware(mcp_app)
+        app.mount("/mcp", authed_mcp_app)
+        logger.info("MCP streamable-http mounted at /mcp")
+    except Exception as e:
+        logger.warning(f"MCP streamable-http not mounted: {e}")
+
     return app
 
 
