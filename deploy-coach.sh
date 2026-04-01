@@ -139,13 +139,12 @@ if issues:
     sys.exit(1)
 else:
     print('  All sessions routed correctly.')
-" 2>&1
+" 2>&1 && ROUTING_OK=true || ROUTING_OK=false
 
-if [ $? -ne 0 ]; then
-    ROUTING_OK=false
+if [ "$ROUTING_OK" = "false" ]; then
     echo ""
-    echo "WARNING: Routing issues detected. Fix before users interact."
+    echo "WARNING: Routing issues detected. Deploy succeeded but fix misroutes before users interact."
 else
     echo ""
-    echo "Verification complete. All clear."
+    echo "Verification complete."
 fi
