@@ -11,6 +11,9 @@ Usage:
 
 import os
 
+# macOS: allow ObjC runtime in forked workers (httpx/Anthropic SDK triggers this)
+os.environ.setdefault("OBJC_DISABLE_INITIALIZE_FORK_SAFETY", "YES")
+
 # Bind to configured port (default 18800)
 bind = f"0.0.0.0:{os.environ.get('KISO_PORT', '18800')}"
 
