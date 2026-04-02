@@ -255,6 +255,18 @@ HRV_RMSSD = {
 
 
 # Coverage weights — reflects relative ROI
+# Zone 2 Cardio (min/week) — higher is better
+# AHA: 150 min/week moderate = meets guideline, 300+ = exceeds
+# Universal (not age/sex stratified for this metric)
+ZONE2_MIN = {
+    "lower_is_better": False,
+    "unit": "min/week",
+    "cutoffs": {
+        "universal": [60, 100, 150, 250],
+    },
+}
+
+
 # These determine how much each metric contributes to the coverage score.
 TIER1_WEIGHTS = {
     "blood_pressure": 8,

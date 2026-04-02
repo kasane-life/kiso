@@ -21,7 +21,7 @@ from engine.scoring.tables import (
     BP_SYSTOLIC, BP_DIASTOLIC, LDL_C, HDL_C, APOB, TRIGLYCERIDES,
     FASTING_GLUCOSE, HBA1C, FASTING_INSULIN, RHR, DAILY_STEPS, WAIST,
     LPA, SLEEP_REGULARITY, HSCRP, ALT, GGT, TSH, VITAMIN_D, FERRITIN,
-    HEMOGLOBIN, VO2_MAX, HRV_RMSSD,
+    HEMOGLOBIN, VO2_MAX, HRV_RMSSD, ZONE2_MIN,
     TIER1_WEIGHTS, TIER2_WEIGHTS,
     TIER1_STANDING_WEIGHTS, TIER2_STANDING_WEIGHTS,
 )
@@ -582,15 +582,20 @@ def score_profile(profile: UserProfile, metric_dates: dict = None,
 
     # --- Tier 2: Zone 2 Cardio ---
     z2_has = profile.zone2_min_per_week is not None
+    z2_standing, z2_pct = assess(profile.zone2_min_per_week, ZONE2_MIN, demo)
     results.append(MetricResult(
         name="Zone 2 Cardio",
         tier=2, rank=20,
         has_data=z2_has,
-        standing=Standing.GOOD if z2_has else Standing.UNKNOWN,
+        value=profile.zone2_min_per_week,
+        unit="min/week",
+        standing=z2_standing if z2_has else Standing.UNKNOWN,
+        percentile_approx=z2_pct,
         coverage_weight=TIER2_WEIGHTS["zone2"],
         cost_to_close="Free with HR wearable",
-        note="150-300 min/week = largest mortality reduction" if not z2_has else "",
+        note="150-300 min/week = largest mortality reduction (AHA)" if not z2_has else "",
     ))
+    _apply_freshness(results[-1], "zone2_min_per_week", dates, as_of)
 
     # --- Compute scores ---
     # Apply freshness × reliability to effective coverage weight

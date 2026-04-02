@@ -146,6 +146,31 @@ def test_bp_reliability_uses_actual_count():
     assert bp_result_protocol.reliability == 1.0, f"16 BP readings should have 1.0 reliability, got {bp_result_protocol.reliability}"
 
 
+def test_zone2_cardio_returns_percentile():
+    """Zone 2 cardio should be scored against AHA guidelines, not binary.
+    152 min/week meets the 150 min target and should return a real percentile.
+    """
+    profile = UserProfile(
+        demographics=Demographics(age=35, sex="M"),
+        zone2_min_per_week=152,
+    )
+    output = score_profile(profile)
+    z2 = next(r for r in output["results"] if r.name == "Zone 2 Cardio")
+    assert z2.has_data is True
+    assert z2.percentile_approx is not None, "Zone 2 with 152 min/week should have a percentile"
+    assert z2.percentile_approx >= 50, "152 min/week meets AHA target, should be at least 50th pct"
+
+    # Under target
+    profile_low = UserProfile(
+        demographics=Demographics(age=35, sex="M"),
+        zone2_min_per_week=60,
+    )
+    output_low = score_profile(profile_low)
+    z2_low = next(r for r in output_low["results"] if r.name == "Zone 2 Cardio")
+    assert z2_low.percentile_approx is not None
+    assert z2_low.percentile_approx < z2.percentile_approx, "60 min should score lower than 152 min"
+
+
 def test_results_have_required_fields():
     """Each MetricResult should have the expected fields."""
     profile = UserProfile(
