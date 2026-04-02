@@ -28,7 +28,8 @@ workers = 2
 graceful_timeout = 10
 
 # Worker timeout (kill unresponsive workers)
-timeout = 30
+# 120s to accommodate LLM API calls (focus plan endpoint)
+timeout = 120
 
 # Preload app in master process (shared memory, faster worker spawn)
 preload_app = True
