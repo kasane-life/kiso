@@ -133,9 +133,8 @@ async def generate_focus_plan(request: Request):
     """
     body = await request.json()
 
-    # Auth
-    from engine.gateway.config import load_config
-    config = load_config()
+    # Auth — config is injected by create_app() via app.state
+    config = request.app.state.config
     token = body.get("token") or request.headers.get("authorization", "").replace("Bearer ", "")
     if not config.api_token:
         raise HTTPException(500, "API token not configured")

@@ -530,6 +530,56 @@ class TestPerUserTokens:
         assert resp.status_code == 403
 
 
+# --- Generate Focus Plan (LLM endpoint) ---
+
+class TestGenerateFocusPlan:
+    def test_auth_required(self, client):
+        """Generate endpoint rejects requests without valid token."""
+        resp = client.post("/api/v1/generate-focus-plan", json={"context": "test"})
+        assert resp.status_code == 403
+
+    def test_auth_accepts_valid_token(self, client, monkeypatch):
+        """Generate endpoint accepts valid token and reaches the LLM call.
+
+        We mock the Anthropic client so no real API call is made.
+        The important thing is that auth passes (no ImportError, no 403).
+        """
+        import engine.gateway.focus_plan_api as fp_mod
+
+        mock_called = {}
+
+        class FakeMessage:
+            def __init__(self):
+                self.content = [type("Block", (), {"text": '{"healthSnapshot":"ok","primaryRecommendation":{"catalogueId":"sleep-consistent-bedtime","action":"go to bed","evidence":[]},"alternatives":[]}'})()]
+
+        class FakeMessages:
+            def create(self, **kwargs):
+                mock_called["model"] = kwargs.get("model")
+                return FakeMessage()
+
+        class FakeAnthropic:
+            def __init__(self):
+                self.messages = FakeMessages()
+
+        monkeypatch.setattr(fp_mod.anthropic, "Anthropic", FakeAnthropic)
+
+        resp = client.post(
+            "/api/v1/generate-focus-plan",
+            json={"token": TOKEN, "context": "Test user context"},
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert "healthSnapshot" in body
+        assert "generated_at" in body
+        assert mock_called.get("model") is not None
+
+    def test_catalogue_endpoint_no_auth(self, client):
+        """Habit catalogue is a public read-only endpoint."""
+        resp = client.get("/api/v1/habit-catalogue")
+        assert resp.status_code == 200
+        assert resp.json()["count"] >= 15
+
+
 # --- Audit logging ---
 
 class TestAuditLogging:
