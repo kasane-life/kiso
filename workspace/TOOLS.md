@@ -82,7 +82,7 @@ web_fetch("https://auth.mybaseline.health/api/log_habits?token=NZCT4pzvxC36OSaCz
 
 | Tool | Key Params | What it does |
 |------|-----------|------|
-| setup_profile | age, sex, weight_target, protein_target, name, goals, user_id | Create or update user config. |
+| setup_profile | age, sex, weight_target, protein_target, name, goals, medications, conditions, phq9_score, waist_inches, family_history, obstacles, existing_habits, exercise_freq, sleep_hours, sleep_quality, stress_level, alcohol_use, tobacco_use, user_id | Partial profile update. All fields optional (age/sex not required). Call with ONLY the fields the user shared. Rebuilds briefing immediately. |
 | connect_garmin | user_id | Check Garmin connection status. |
 | pull_garmin | history, workouts, user_id | Pull fresh Garmin data. |
 | connect_oura | user_id | Check Oura Ring connection status. |
