@@ -63,6 +63,7 @@ class UserProfile:
     # Body
     waist_circumference: Optional[float] = None  # inches
     weight_lbs: Optional[float] = None
+    height_inches: Optional[float] = None  # for BMI calculation
 
     # Medications
     has_medication_list: Optional[bool] = None

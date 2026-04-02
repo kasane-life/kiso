@@ -255,6 +255,19 @@ HRV_RMSSD = {
 
 
 # Coverage weights — reflects relative ROI
+# Waist-to-Height Ratio (WHtR) — lower is better
+# Ashwell & Hsieh 2005 meta-analysis: WHtR < 0.5 = healthy
+# Better predictor of cardiometabolic risk than BMI
+# Universal (same threshold for all ages/sexes per meta-analysis)
+WHTR = {
+    "lower_is_better": True,
+    "unit": "ratio",
+    "cutoffs": {
+        "universal": [0.43, 0.47, 0.50, 0.58],
+    },
+}
+
+
 # Zone 2 Cardio (min/week) — higher is better
 # AHA: 150 min/week moderate = meets guideline, 300+ = exceeds
 # Universal (not age/sex stratified for this metric)

@@ -21,7 +21,7 @@ from engine.scoring.tables import (
     BP_SYSTOLIC, BP_DIASTOLIC, LDL_C, HDL_C, APOB, TRIGLYCERIDES,
     FASTING_GLUCOSE, HBA1C, FASTING_INSULIN, RHR, DAILY_STEPS, WAIST,
     LPA, SLEEP_REGULARITY, HSCRP, ALT, GGT, TSH, VITAMIN_D, FERRITIN,
-    HEMOGLOBIN, VO2_MAX, HRV_RMSSD, ZONE2_MIN,
+    HEMOGLOBIN, VO2_MAX, HRV_RMSSD, ZONE2_MIN, WHTR,
     TIER1_WEIGHTS, TIER2_WEIGHTS,
     TIER1_STANDING_WEIGHTS, TIER2_STANDING_WEIGHTS,
 )
@@ -556,17 +556,27 @@ def score_profile(profile: UserProfile, metric_dates: dict = None,
         _apply_clinical(results[-1], "ferritin", profile.ferritin, demo)
         _apply_freshness(results[-1], "ferritin", dates, as_of)
 
-    # --- Tier 2: Weight Trends ---
+    # --- Tier 2: Weight Trends (WHtR if available, else binary) ---
     weight_has = profile.weight_lbs is not None
+    whtr_value = None
+    whtr_standing = Standing.UNKNOWN
+    whtr_pct = None
+    if profile.waist_circumference and profile.height_inches:
+        whtr_value = round(profile.waist_circumference / profile.height_inches, 3)
+        whtr_standing, whtr_pct = assess(whtr_value, WHTR, demo)
     results.append(MetricResult(
         name="Weight Trends",
         tier=2, rank=18,
         has_data=weight_has,
-        standing=Standing.GOOD if weight_has else Standing.UNKNOWN,
+        value=whtr_value,
+        unit=f"WHtR ({profile.weight_lbs:.0f} lbs, {profile.waist_circumference:.1f}\" waist)" if whtr_value else "",
+        standing=whtr_standing if whtr_value else (Standing.GOOD if weight_has else Standing.UNKNOWN),
+        percentile_approx=whtr_pct,
         coverage_weight=TIER2_WEIGHTS["weight_trends"],
         cost_to_close="$20-50 (smart scale)",
-        note="Progressive drift is the signal, not absolute weight" if not weight_has else "",
+        note="" if weight_has else "Progressive drift is the signal, not absolute weight",
     ))
+    _apply_freshness(results[-1], "weight_lbs", dates, as_of)
 
     # --- Tier 2: PHQ-9 ---
     phq9_has = profile.phq9_score is not None

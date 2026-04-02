@@ -171,6 +171,28 @@ def test_zone2_cardio_returns_percentile():
     assert z2_low.percentile_approx < z2.percentile_approx, "60 min should score lower than 152 min"
 
 
+def test_weight_trends_shows_whtr_and_percentile():
+    """Weight Trends should calculate WHtR and score against Ashwell cutoffs.
+    5'10" (70 inches), 35.5" waist = WHtR 0.507.
+    """
+    profile = UserProfile(
+        demographics=Demographics(age=35, sex="M"),
+        weight_lbs=190.5,
+        waist_circumference=35.5,
+    )
+    profile.height_inches = 70  # 5'10"
+
+    output = score_profile(profile)
+    wt = next(r for r in output["results"] if r.name == "Weight Trends")
+    assert wt.has_data is True
+    assert wt.value is not None, "Weight Trends should show WHtR value"
+    assert 0.4 < wt.value < 0.6, f"WHtR should be ~0.507, got {wt.value}"
+    assert wt.percentile_approx is not None, "Weight Trends should have a percentile"
+    # 0.507 is just above the 0.50 healthy threshold (Below Average in Ashwell framework)
+    # Lower is better for WHtR. 0.507 > 0.50 cutoff = Below Average (25th)
+    assert wt.percentile_approx == 25, f"WHtR 0.507 should be Below Average (25th), got {wt.percentile_approx}"
+
+
 def test_results_have_required_fields():
     """Each MetricResult should have the expected fields."""
     profile = UserProfile(

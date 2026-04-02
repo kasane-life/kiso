@@ -454,6 +454,8 @@ def _score(user_id: str | None = None) -> dict:
         profile.has_medication_list = True
     if profile_cfg.get("waist_inches") is not None:
         profile.waist_circumference = profile_cfg["waist_inches"]
+    if profile_cfg.get("height_inches") is not None:
+        profile.height_inches = profile_cfg["height_inches"]
     if profile_cfg.get("phq9_score") is not None:
         profile.phq9_score = profile_cfg["phq9_score"]
 
@@ -576,11 +578,13 @@ def _get_protocols(user_id: str | None = None) -> list[dict]:
     data_dir = _data_dir(user_id)
     habit_data = get_habits(user_id, data_dir=data_dir) or None
 
-    garmin = None
-    garmin_path = data_dir / "garmin_latest.json"
-    if garmin_path.exists():
-        with open(garmin_path) as f:
-            garmin = json.load(f)
+    _pid = _resolve_person_id(user_id)
+    garmin = _load_wearable_averages_sqlite(_pid) if _pid else None
+    if garmin is None:
+        garmin_path = data_dir / "garmin_latest.json"
+        if garmin_path.exists():
+            with open(garmin_path) as f:
+                garmin = json.load(f)
 
     today = datetime.now().strftime("%Y-%m-%d")
     results = []
