@@ -46,25 +46,27 @@ iOS Shortcuts ---> /api/{tool} ------/
 - `get_person_context` merges both into one read
 
 **Deployment:**
-- Native launchd service (`com.kiso.v1api`) on Mac Mini (M4 Pro), port 18800. NOT Docker.
+- Gunicorn + 2 uvicorn workers on Mac Mini (M4 Pro), port 18800. Zero-downtime HUP reload.
 - Cloudflare Tunnel for HTTPS (`auth.mybaseline.health`)
 - Agent workspace deployed separately via `deploy-coach.sh`
-- Config: `~/.config/health-engine/gateway.yaml` (legacy path, backward compat)
+- Full runbook: `hub/execution/DEPLOY-RUNBOOK.md`
+
+**Deploying API changes — HARD RULE:**
+- **NEVER scp, rsync, or copy files to Mac Mini.** All code deploys via git push + pull.
+- **NEVER edit files on Mac Mini directly.** Commit on laptop, push, pull on Mac Mini.
+- From laptop: `./scripts/deploy-api.sh` (pushes to GitHub, pulls on Mac Mini, HUP reload)
+- From laptop with tests: `./scripts/deploy-api.sh --test-first`
+- For cold restart (dep changes): `./scripts/deploy-api.sh --cold`
+- **NEVER** manually `kill` the API process. Use `restart-api.sh`.
+- After deploy, verify: `ssh mac-mini 'curl -s http://localhost:18800/health'`
+- Auth: `?token=X` query param, `token` in JSON body, or `Authorization: Bearer X` header. All three work.
 
 **Gateway restart — HARD RULE:**
 - NEVER restart the gateway manually. Use `deploy-coach.sh` for workspace changes or `restart-api.sh` for API changes.
 - After ANY gateway restart or agent/binding change, verify routing: `openclaw agents bindings` then confirm each active user's session routes to the correct agent.
 - Adding a new agent or changing bindings can cause existing sessions to misroute during the restart window. Always reset affected user sessions after gateway changes.
-- Grigoriy (Telegram 6460316634) must route to `main` (Milo), never to `k` or any other agent.
+- Grigoriy (Telegram 80135247) must route to `main` (Milo), never to `k` or any other agent.
 - deploy-coach.sh now includes post-deploy verification that checks all user sessions route to the correct agent. If misrouting is detected, it prints the fix command.
-
-**Deploying API changes — HARD RULE:**
-- From laptop: `./scripts/deploy-api.sh` (syncs code via rsync + restarts cleanly)
-- From laptop with tests: `./scripts/deploy-api.sh --test-first`
-- On Mac Mini directly: `bash scripts/restart-api.sh`
-- **NEVER** manually `kill` the API process. launchd `KeepAlive` will respawn it before your new process can bind the port. The restart script handles the bootout-kill-retry sequence correctly.
-- **NEVER** use `launchctl load/unload` (deprecated). Use `launchctl bootstrap/bootout`.
-- Auth: `?token=X` query param, `token` in JSON body, or `Authorization: Bearer X` header. All three work.
 
 ## How to Coach
 
