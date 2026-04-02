@@ -78,9 +78,17 @@ def create_app(config: GatewayConfig | None = None) -> "FastAPI":
     from .api import api_handler, api_list_tools, api_async_handler, api_job_status, api_upload, api_shortcut, open_shortcut_redirect, open_automation_redirect
     from .transcripts import transcripts_api, transcripts_html
     from .v1_api import register_v1_routes
+    from .focus_plan_api import router as focus_plan_router
+    from .scheduler import register_scheduler_routes
 
     # Kasane v1 API (must come before the {tool_name} wildcard)
     register_v1_routes(app)
+
+    # Focus plan generation with cited habits (Apple 1.4.1 fix)
+    app.include_router(focus_plan_router)
+
+    # Deterministic scheduler (must come before the {tool_name} wildcard)
+    register_scheduler_routes(app)
 
     # Explicit routes MUST come before the {tool_name} wildcard
     app.get("/api/tools")(api_list_tools)
@@ -1062,7 +1070,27 @@ def run_gateway(config: GatewayConfig | None = None):
     if config is None:
         config = load_gateway_config()
     init_db()
+
+    # Logfire OTEL tracing (auto-instruments FastAPI if available)
+    _logfire_ok = False
+    try:
+        import logfire
+        logfire.configure(service_name="kiso", send_to_logfire="if-token-present")
+        _logfire_ok = True
+        logger.info("Logfire tracing initialized")
+    except ImportError:
+        logger.info("logfire not installed, skipping tracing")
+    except Exception as e:
+        logger.warning("Logfire init failed: %s. Continuing without tracing.", e)
+
     app = create_app(config)
+
+    if _logfire_ok:
+        try:
+            logfire.instrument_fastapi(app)
+        except Exception:
+            pass
+
     print(f"Health Engine Gateway starting on port {config.port}")
     if config.tunnel_domain:
         print(f"Tunnel domain: https://{config.tunnel_domain}")
