@@ -32,6 +32,39 @@ from .token_store import TokenStore
 logger = logging.getLogger("health-engine.gateway")
 
 
+def _wearable_freshness_sqlite(user_id: str) -> dict | None:
+    """Get wearable freshness for a user from wearable_daily SQLite.
+
+    Returns dict with source, last_date, updated_at, age_hours.
+    Returns None if no data found.
+    """
+    try:
+        from .db import get_db, init_db
+        init_db()
+        db = get_db()
+        # Resolve person_id
+        person_row = db.execute(
+            "SELECT id FROM person WHERE health_engine_user_id = ? AND deleted_at IS NULL",
+            (user_id,),
+        ).fetchone()
+        if not person_row:
+            return None
+        row = db.execute(
+            "SELECT source, date, updated_at FROM wearable_daily "
+            "WHERE person_id = ? ORDER BY date DESC LIMIT 1",
+            (person_row["id"],),
+        ).fetchone()
+        if not row:
+            return None
+        return {
+            "source": row["source"],
+            "last_date": row["date"],
+            "updated_at": row["updated_at"],
+        }
+    except Exception:
+        return None
+
+
 # --- Rate limiting (in-memory) ---
 
 _rate_limits: dict[str, list[float]] = defaultdict(list)
@@ -46,6 +79,107 @@ def _check_rate_limit(key: str, max_requests: int, window_seconds: int) -> bool:
         return False
     _rate_limits[key].append(now)
     return True
+
+
+class MCPAuthMiddleware:
+    """ASGI middleware for MCP transport: validates tokens, injects user_id,
+    and writes audit log entries for tools/call JSON-RPC requests.
+
+    Args:
+        app: The downstream ASGI application (MCP streamable-http).
+        resolve_user_id: Callable that takes a bearer token and returns
+            the resolved user_id (or None if invalid).
+        validate_token: Optional callable that takes a token and returns
+            True if valid. If None, any token that resolve_user_id returns
+            a non-None user_id for is considered valid.
+    """
+
+    def __init__(self, app, *, resolve_user_id=None, validate_token=None):
+        self.app = app
+        self._resolve_user_id = resolve_user_id or (lambda t: None)
+        self._validate_token = validate_token
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        # Extract token from Authorization header or query param
+        token = None
+        for name, value in scope.get("headers", []):
+            if name == b"authorization":
+                val = value.decode("utf-8", errors="replace")
+                if val.startswith("Bearer "):
+                    token = val[7:]
+                break
+        if not token:
+            qs = scope.get("query_string", b"").decode("utf-8", errors="replace")
+            for part in qs.split("&"):
+                if part.startswith("token="):
+                    token = part[6:]
+                    break
+
+        # Validate
+        valid = False
+        resolved_user_id = None
+        if token:
+            resolved_user_id = self._resolve_user_id(token)
+            if resolved_user_id:
+                valid = True
+            elif self._validate_token and self._validate_token(token):
+                valid = True
+
+        if not valid:
+            # Return 403 without importing starlette at module level
+            body = json.dumps({"error": "Invalid or missing token"}).encode()
+            await send({
+                "type": "http.response.start",
+                "status": 403,
+                "headers": [(b"content-type", b"application/json")],
+            })
+            await send({"type": "http.response.body", "body": body})
+            return
+
+        # Inject user_id into tools/call JSON-RPC arguments and audit log
+        if resolved_user_id:
+            injected = False
+
+            async def receive_with_user_id():
+                nonlocal injected
+                message = await receive()
+                if not injected and message.get("type") == "http.request":
+                    body = message.get("body", b"")
+                    if body:
+                        try:
+                            data = json.loads(body)
+                            if data.get("method") == "tools/call":
+                                tool_name = data.get("params", {}).get("name", "?")
+                                args = data.get("params", {}).get("arguments", {})
+                                if not args.get("user_id"):
+                                    args["user_id"] = resolved_user_id
+                                    data["params"]["arguments"] = args
+                                    new_body = json.dumps(data).encode()
+                                    message = {**message, "body": new_body}
+                                logger.info(f"MCP auth: injected user_id={resolved_user_id} into {tool_name}")
+                                injected = True
+                                # Audit log the MCP tool call
+                                try:
+                                    from engine.gateway.api import _audit_log
+                                    _audit_log(
+                                        tool_name, resolved_user_id,
+                                        {k: v for k, v in args.items() if k != "user_id"},
+                                        None, None, 0,
+                                        source="mcp",
+                                    )
+                                except Exception:
+                                    logger.warning("MCP audit log failed", exc_info=True)
+                        except (ValueError, KeyError, TypeError):
+                            pass
+                return message
+
+            await self.app(scope, receive_with_user_id, send)
+            return
+        await self.app(scope, receive, send)
 
 
 def create_app(config: GatewayConfig | None = None) -> "FastAPI":
@@ -335,12 +469,28 @@ def create_app(config: GatewayConfig | None = None) -> "FastAPI":
             garmin_status = {"status": "db_error"}
         checks["garmin_tokens"] = garmin_status if garmin_status else {"status": "no_users_connected"}
 
-        # 4. Apple Health per-user freshness
+        # 4. Apple Health per-user freshness (SQLite first, JSON fallback)
         apple_health = {}
         if users_dir.exists():
             for user_dir in sorted(users_dir.iterdir()):
                 if not user_dir.is_dir() or user_dir.name in skip_users:
                     continue
+                uid = user_dir.name
+                # Try SQLite first
+                freshness = _wearable_freshness_sqlite(uid)
+                if freshness and freshness["source"] == "apple_health":
+                    try:
+                        from datetime import datetime as _dt, timezone as _tz
+                        ts = _dt.fromisoformat(freshness["updated_at"].replace("Z", "+00:00"))
+                        age_hours = (_dt.now(_tz.utc) - ts).total_seconds() / 3600
+                        apple_health[uid] = {
+                            "status": "ok" if age_hours < 48 else "stale",
+                            "last_sync_hours_ago": round(age_hours, 1),
+                        }
+                    except Exception:
+                        apple_health[uid] = {"status": "parse_error"}
+                    continue
+                # JSON fallback
                 ah_file = user_dir / "apple_health_latest.json"
                 if ah_file.exists():
                     try:
@@ -352,16 +502,16 @@ def create_app(config: GatewayConfig | None = None) -> "FastAPI":
                             try:
                                 ts = _dt.fromisoformat(last_updated.replace("Z", "+00:00"))
                                 age_hours = (datetime.now().astimezone() - ts).total_seconds() / 3600
-                                apple_health[user_dir.name] = {
+                                apple_health[uid] = {
                                     "status": "ok" if age_hours < 48 else "stale",
                                     "last_sync_hours_ago": round(age_hours, 1),
                                 }
                             except:
-                                apple_health[user_dir.name] = {"status": "parse_error"}
+                                apple_health[uid] = {"status": "parse_error"}
                         else:
-                            apple_health[user_dir.name] = {"status": "no_timestamp"}
+                            apple_health[uid] = {"status": "no_timestamp"}
                     except:
-                        apple_health[user_dir.name] = {"status": "read_error"}
+                        apple_health[uid] = {"status": "read_error"}
 
         if apple_health:
             checks["apple_health"] = apple_health
@@ -646,12 +796,6 @@ def create_app(config: GatewayConfig | None = None) -> "FastAPI":
         register_tools(mcp_server)
         register_resources(mcp_server)
 
-        # Auth middleware: validates tokens and injects user_id into MCP
-        # tool call arguments. Contextvars don't propagate through the MCP
-        # SDK's tool execution, so we modify the JSON-RPC request body
-        # directly before the SDK sees it.
-        import json as _json
-
         def _resolve_token_to_user_id(token: str) -> str | None:
             """Look up a per-user token's health_engine_user_id."""
             if token not in config.token_persons:
@@ -673,66 +817,8 @@ def create_app(config: GatewayConfig | None = None) -> "FastAPI":
             except Exception:
                 return None
 
-        class MCPAuthMiddleware:
-            def __init__(self, app):
-                self.app = app
-
-            async def __call__(self, scope, receive, send):
-                if scope["type"] == "http":
-                    request = StarletteRequest(scope, receive)
-                    token = None
-                    auth = request.headers.get("authorization", "")
-                    if auth.startswith("Bearer "):
-                        token = auth[7:]
-                    if not token:
-                        token = request.query_params.get("token")
-                    # Validate against gateway config
-                    valid = False
-                    resolved_user_id = None
-                    if token:
-                        if token in config.token_persons:
-                            valid = True
-                            resolved_user_id = _resolve_token_to_user_id(token)
-                        elif config.api_token and token == config.api_token:
-                            valid = True
-                            resolved_user_id = config.admin_user_id or None
-                    if not valid:
-                        response = StarletteJSONResponse(
-                            {"error": "Invalid or missing token"}, status_code=403
-                        )
-                        await response(scope, receive, send)
-                        return
-
-                    # Inject user_id into tools/call JSON-RPC arguments.
-                    # This is more reliable than contextvars which don't
-                    # propagate through the MCP SDK's tool execution.
-                    if resolved_user_id:
-                        injected = False
-
-                        async def receive_with_user_id():
-                            nonlocal injected
-                            message = await receive()
-                            if not injected and message.get("type") == "http.request":
-                                body = message.get("body", b"")
-                                if body:
-                                    try:
-                                        data = _json.loads(body)
-                                        if data.get("method") == "tools/call":
-                                            args = data.get("params", {}).get("arguments", {})
-                                            if not args.get("user_id"):
-                                                args["user_id"] = resolved_user_id
-                                                data["params"]["arguments"] = args
-                                                new_body = _json.dumps(data).encode()
-                                                message = {**message, "body": new_body}
-                                                injected = True
-                                                logger.info(f"MCP auth: injected user_id={resolved_user_id} into {data.get('params', {}).get('name', '?')}")
-                                    except (ValueError, KeyError, TypeError):
-                                        pass
-                            return message
-
-                        await self.app(scope, receive_with_user_id, send)
-                        return
-                await self.app(scope, receive, send)
+        def _validate_token(token: str) -> bool:
+            return bool(config.api_token and token == config.api_token)
 
         mcp_app = mcp_server.streamable_http_app()
 
@@ -752,8 +838,12 @@ def create_app(config: GatewayConfig | None = None) -> "FastAPI":
 
         app.router.lifespan_context = combined_lifespan
 
-        # Wrap with auth
-        authed_mcp_app = MCPAuthMiddleware(mcp_app)
+        # Wrap with auth + audit logging
+        authed_mcp_app = MCPAuthMiddleware(
+            mcp_app,
+            resolve_user_id=_resolve_token_to_user_id,
+            validate_token=_validate_token,
+        )
         app.mount("/mcp", authed_mcp_app)
         logger.info("MCP streamable-http mounted at /mcp")
     except Exception as e:

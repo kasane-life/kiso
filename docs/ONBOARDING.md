@@ -27,6 +27,48 @@ uv sync --extra garmin           # optional: Garmin integration
 
 ## Step 2: Connect to Claude
 
+### Option A: Remote MCP (recommended for most users)
+
+No local install needed. You get a token and connect to the hosted server.
+
+**Claude Code (CLI):**
+
+```bash
+claude mcp add health-engine --transport http \
+  -H "Authorization:Bearer YOUR_TOKEN" \
+  https://auth.mybaseline.health/mcp/
+```
+
+**Claude Desktop:**
+
+Claude Desktop has a known bug with streamable-http transport ([#5826](https://github.com/anthropics/claude-code/issues/5826)). Use the `mcp-remote` stdio bridge as a workaround.
+
+Add this to your `claude_desktop_config.json` (Settings > Developer > Edit Config):
+
+```json
+{
+  "mcpServers": {
+    "health-engine": {
+      "command": "npx",
+      "args": [
+        "mcp-remote",
+        "https://auth.mybaseline.health/mcp/",
+        "--header",
+        "Authorization:Bearer YOUR_TOKEN"
+      ]
+    }
+  }
+}
+```
+
+Requires Node.js 18+. The `npx mcp-remote` command handles the stdio-to-HTTP bridging automatically.
+
+Restart Claude Desktop after saving. Start a new conversation and say "check in on my health."
+
+### Option B: Local MCP (self-hosted)
+
+For developers who want to run the engine locally:
+
 Add to your MCP config (`~/.mcp.json` for Claude Code, or Claude Desktop settings):
 
 ```json
@@ -41,7 +83,7 @@ Add to your MCP config (`~/.mcp.json` for Claude Code, or Claude Desktop setting
 }
 ```
 
-Restart Claude. That's it — the tools are now available in every conversation.
+Restart Claude. That's it -- the tools are now available in every conversation.
 
 ## Step 3: Say "Set me up"
 

@@ -32,12 +32,13 @@ _AUDIT_LOG_PATH = os.path.join("data", "admin", "api_audit.jsonl")
 
 
 def _audit_log(tool: str, user_id: str, params: dict, result: dict | None,
-               error: str | None, elapsed_ms: int):
+               error: str | None, elapsed_ms: int, source: str = "http"):
     """Append one audit entry to data/admin/api_audit.jsonl."""
     entry = {
         "ts": datetime.now(timezone.utc).astimezone().isoformat(),
         "tool": tool,
         "user_id": user_id,
+        "source": source,
         "params": {k: v for k, v in params.items() if k != "token"},
         "status": "ok" if error is None else "error",
         "ms": elapsed_ms,
