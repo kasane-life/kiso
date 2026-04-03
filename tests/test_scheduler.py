@@ -518,6 +518,44 @@ class TestConversationIngestion:
         assert row[0] == 0, "Failed send should not write to conversation_message"
 
 
+# --- Conversation message dedup tests ---
+
+
+class TestConversationDedup:
+    """Verify that duplicate messages within 60s are skipped."""
+
+    @patch("engine.gateway.scheduler._compose_message", return_value="Good morning! Here's your brief.")
+    @patch("engine.gateway.scheduler._gather_context", return_value={})
+    @patch("engine.gateway.scheduler._send_via_openclaw", return_value={"status": "sent", "message_id": "abc"})
+    @patch("engine.gateway.scheduler._user_local_now")
+    @patch("engine.gateway.scheduler._get_eligible_persons")
+    @patch("engine.gateway.scheduler._audit_scheduler")
+    def test_scheduler_skips_duplicate_within_60s(self, mock_audit, mock_persons, mock_now, mock_send, mock_context, mock_compose, db_with_andrew):
+        mock_persons.return_value = [
+            {"id": "andrew-001", "name": "Andrew", "health_engine_user_id": "andrew",
+             "channel": "whatsapp", "channel_target": "+14152009584", "timezone": "America/Los_Angeles"},
+        ]
+        mock_now.return_value = datetime(2026, 4, 2, 7, 10, tzinfo=ZoneInfo("America/Los_Angeles"))
+
+        # Simulate OpenClaw webhook arriving first
+        db_with_andrew.execute(
+            """INSERT INTO conversation_message
+               (user_id, role, content, sender_id, sender_name, channel,
+                session_key, message_id, timestamp, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))""",
+            ("andrew", "assistant", "Good morning! Here's your brief.", "milo", "Milo", "whatsapp",
+             "agent:main:whatsapp:direct:+14152009584", "webhook-123"),
+        )
+        db_with_andrew.commit()
+
+        # Now scheduler runs and tries to ingest the same message
+        _run_schedule("morning_brief", target_hour=7, dry_run=False)
+
+        # Should have exactly 1 row (the webhook one), not 2
+        count = db_with_andrew.execute("SELECT COUNT(*) FROM conversation_message").fetchone()[0]
+        assert count == 1, f"Expected 1 message (deduped), got {count}"
+
+
 # --- Manual send endpoint tests ---
 
 

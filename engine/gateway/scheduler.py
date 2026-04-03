@@ -207,6 +207,18 @@ def _ingest_scheduled_message(db, user_id: str, channel: str, message: str, sour
     now = datetime.utcnow().isoformat() + "Z"
     sender_name = "milo-manual" if source == "manual" else "milo-scheduler"
     try:
+        # Dedup: skip if identical message for same user was written in last 60s
+        existing = db.execute(
+            """SELECT 1 FROM conversation_message
+               WHERE user_id = ? AND role = 'assistant' AND content = ?
+               AND created_at > datetime('now', '-60 seconds')
+               LIMIT 1""",
+            (user_id, message),
+        ).fetchone()
+        if existing:
+            logger.debug("Skipping duplicate scheduled message for %s", user_id)
+            return
+
         db.execute(
             """INSERT INTO conversation_message
                (user_id, role, content, sender_id, sender_name, channel,

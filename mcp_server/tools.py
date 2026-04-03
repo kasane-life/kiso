@@ -3326,6 +3326,18 @@ def _ingest_message(
                         user_id = phone_map[clean]["user_id"]
 
     conn = get_db()
+
+    # Dedup: skip if identical message for same user was written in last 60s
+    existing = conn.execute(
+        """SELECT 1 FROM conversation_message
+           WHERE user_id = ? AND role = ? AND content = ?
+           AND created_at > datetime('now', '-60 seconds')
+           LIMIT 1""",
+        (user_id, role, content),
+    ).fetchone()
+    if existing:
+        return {"status": "duplicate_skipped", "user_id": user_id}
+
     conn.execute(
         """INSERT INTO conversation_message
            (user_id, role, content, sender_id, sender_name, channel,
