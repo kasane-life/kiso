@@ -425,6 +425,22 @@ CREATE TABLE IF NOT EXISTS scheduled_send (
     UNIQUE(person_id, schedule_type, sent_date)
 );
 
+-- Per-user issue tracker: auto-created from signals and audit error spikes
+CREATE TABLE IF NOT EXISTS user_issue (
+    id          TEXT PRIMARY KEY,
+    person_id   TEXT NOT NULL REFERENCES person(id),
+    category    TEXT NOT NULL,   -- auth_failure, stale_data, engagement, onboarding, error_spike, bad_coaching
+    title       TEXT NOT NULL,
+    detail      TEXT,
+    status      TEXT NOT NULL DEFAULT 'open',  -- open, resolved
+    source      TEXT,            -- signal, audit, manual
+    dedup_key   TEXT,            -- prevents duplicate open issues
+    created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    resolved_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_user_issue_person ON user_issue(person_id);
+CREATE INDEX IF NOT EXISTS idx_user_issue_status ON user_issue(status);
+
 -- OAuth: dynamic client registration (Claude iOS registers itself)
 CREATE TABLE IF NOT EXISTS oauth_client (
     client_id   TEXT PRIMARY KEY,

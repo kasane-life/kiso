@@ -936,6 +936,47 @@ def _load_health_context(user_id: str) -> dict:
     return health
 
 
+# --- Issues endpoints (admin-only) ---
+
+
+def _require_admin(request: Request, token: str = Query(None)):
+    """Require the admin api_token (not per-user tokens)."""
+    config = _get_config(request)
+    effective = token
+    if not effective:
+        auth = request.headers.get("authorization", "")
+        if auth.startswith("Bearer "):
+            effective = auth[7:]
+    if not effective or effective != config.api_token:
+        raise HTTPException(403, "Admin token required")
+    return effective
+
+
+@router.get("/issues")
+def list_issues_endpoint(
+    request: Request,
+    token: str = Depends(_require_admin),
+    person_id: str = Query(None),
+    status: str = Query(None),
+):
+    from .issues import list_issues
+    db = get_db()
+    issues = list_issues(db, person_id=person_id, status=status)
+    return {"issues": issues, "count": len(issues)}
+
+
+@router.post("/issues/{issue_id}/resolve")
+def resolve_issue_endpoint(
+    issue_id: str,
+    request: Request,
+    token: str = Depends(_require_admin),
+):
+    from .issues import resolve_issue
+    db = get_db()
+    resolve_issue(db, issue_id)
+    return {"status": "resolved", "id": issue_id}
+
+
 # --- Route registration ---
 
 def register_v1_routes(app):
