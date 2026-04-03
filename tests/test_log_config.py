@@ -1,13 +1,17 @@
 """Tests for structured JSON logging configuration."""
 
+import ast
 import json
 import logging
 import sys
 from io import StringIO
+from pathlib import Path
 
 import pytest
 
 from engine.gateway.log_config import JsonFormatter, configure_logging
+
+GATEWAY_DIR = Path(__file__).parent.parent / "engine" / "gateway"
 
 
 class TestJsonFormatter:
@@ -131,3 +135,21 @@ class TestConfigureLogging:
         finally:
             root.handlers = old_handlers
             root.level = old_level
+
+
+class TestNoPrintInGateway:
+    """Lint: gateway code must use logger, not print()."""
+
+    def test_no_print_in_gateway(self):
+        """No print() calls in engine/gateway/ — use logging.getLogger() instead."""
+        violations = []
+        for py_file in sorted(GATEWAY_DIR.glob("*.py")):
+            tree = ast.parse(py_file.read_text())
+            for node in ast.walk(tree):
+                if (isinstance(node, ast.Call)
+                        and isinstance(node.func, ast.Name)
+                        and node.func.id == "print"):
+                    violations.append(f"{py_file.name}:{node.lineno}")
+        assert violations == [], (
+            f"print() found in gateway code (use logger instead): {violations}"
+        )

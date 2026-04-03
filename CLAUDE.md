@@ -172,8 +172,15 @@ This system serves multiple users with very different profiles. What's "critical
 Every feature ships with:
 - Tests (unit + integration)
 - Audit logging (user_id, params, latency)
+- Structured logging via `logging.getLogger()` — NEVER use `print()` in gateway code
 - Error messages that tell the user what to do
 - Security review: no plaintext secrets, HMAC-signed links, encrypted tokens at rest
+
+**Logging — HARD RULE:**
+- All gateway code uses `logger = logging.getLogger("health-engine.<module>")`, never `print()`.
+- `configure_logging()` in `engine/gateway/log_config.py` sets up JSON formatting. All `logger.*` calls automatically emit structured JSON to stdout.
+- Tool calls are auto-audited by `_audit_log()` in the dispatch layer. New tools in TOOL_REGISTRY get this for free.
+- A lint test (`test_no_print_in_gateway`) enforces no `print()` in `engine/gateway/`. If you need user-facing CLI output, put it in a CLI module, not gateway.
 
 Integration standards:
 - OAuth 2.0 Authorization Code + PKCE for third-party services
