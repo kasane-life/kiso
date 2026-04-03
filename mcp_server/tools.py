@@ -241,6 +241,12 @@ def _load_wearable_averages_sqlite(person_id: str, days: int = 7) -> dict | None
                     return r[key]
             return None
 
+        def _latest_with_source(key):
+            for r in rows:  # already DESC by date
+                if r[key] is not None:
+                    return r[key], r["source"]
+            return None, None
+
         # Sleep regularity: stddev of bedtime in minutes
         import statistics
         bedtimes = []
@@ -258,13 +264,16 @@ def _load_wearable_averages_sqlite(person_id: str, days: int = 7) -> dict | None
         z2_vals = [r["zone2_min"] for r in rows if r["zone2_min"] is not None]
         zone2_sum = sum(z2_vals) if z2_vals else None
 
+        vo2_val, vo2_src = _latest_with_source("vo2_max")
+
         return {
             "resting_hr": _avg("rhr"),
             "daily_steps_avg": _avg("steps"),
             "sleep_duration_avg": _avg("sleep_hrs"),
             "sleep_regularity_stddev": stddev,
             "hrv_rmssd_avg": _avg("hrv"),
-            "vo2_max": _latest("vo2_max"),
+            "vo2_max": vo2_val,
+            "vo2_max_source": vo2_src,
             "zone2_min_per_week": zone2_sum,
         }
     except Exception as e:

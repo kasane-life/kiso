@@ -165,6 +165,7 @@ def build_briefing(config: dict) -> dict:
             "sleep_duration_avg": wearable.get("sleep_duration_avg"),
             "sleep_regularity_stddev": wearable.get("sleep_regularity_stddev"),
             "vo2_max": wearable.get("vo2_max"),
+            "vo2_max_source": wearable.get("vo2_max_source"),
             "daily_steps_avg": wearable.get("daily_steps_avg"),
             "zone2_min_per_week": wearable.get("zone2_min_per_week"),
         }

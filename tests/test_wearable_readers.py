@@ -203,6 +203,92 @@ class TestLoadWearableAveragesSqlite:
         assert avgs["zone2_min_per_week"] == 435
 
 
+class TestVo2MaxSourceAnnotation:
+    """VO2 max must include source so coaching doesn't alarm on cross-source changes."""
+
+    def test_vo2_max_source_returned(self, db):
+        """_load_wearable_averages_sqlite must return vo2_max_source alongside vo2_max."""
+        conn, db_path = db
+        from mcp_server.tools import _load_wearable_averages_sqlite
+
+        with patch("engine.gateway.db._db_path", return_value=db_path):
+            avgs = _load_wearable_averages_sqlite("p1")
+
+        assert avgs is not None
+        assert "vo2_max_source" in avgs, "Missing vo2_max_source key"
+        assert avgs["vo2_max_source"] == "garmin"
+
+    def test_vo2_max_source_tracks_actual_provider(self, tmp_path):
+        """When latest VO2 comes from apple_health, vo2_max_source should say so."""
+        from engine.gateway.db import init_db, get_db, close_db
+        close_db()
+        db_path = tmp_path / "kasane.db"
+        init_db(db_path)
+        conn = get_db(db_path)
+        now = datetime.now(timezone.utc).isoformat()
+
+        conn.execute(
+            "INSERT INTO person (id, name, health_engine_user_id, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            ("p1", "Grigoriy", "grigoriy", now, now),
+        )
+        # Garmin data on Apr 1 with VO2 47.0
+        conn.execute(
+            "INSERT INTO wearable_daily "
+            "(id, person_id, date, source, rhr, hrv, steps, sleep_hrs, vo2_max, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("g1", "p1", "2026-04-01", "garmin", 48.0, 62.0, 9500, 7.5, 47.0, now, now),
+        )
+        # Apple Health data on Apr 2 with VO2 32.3 (different algorithm)
+        conn.execute(
+            "INSERT INTO wearable_daily "
+            "(id, person_id, date, source, rhr, hrv, steps, sleep_hrs, vo2_max, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("a1", "p1", "2026-04-02", "apple_health", 50.0, 40.0, 8000, 7.0, 32.3, now, now),
+        )
+        conn.commit()
+
+        from mcp_server.tools import _load_wearable_averages_sqlite
+        with patch("engine.gateway.db._db_path", return_value=db_path):
+            avgs = _load_wearable_averages_sqlite("p1")
+
+        assert avgs["vo2_max"] == 32.3, "Should use latest VO2 (apple_health)"
+        assert avgs["vo2_max_source"] == "apple_health"
+
+        close_db()
+
+    def test_vo2_max_source_none_when_no_vo2(self, tmp_path):
+        """When no VO2 data exists, vo2_max_source should be None."""
+        from engine.gateway.db import init_db, get_db, close_db
+        close_db()
+        db_path = tmp_path / "kasane.db"
+        init_db(db_path)
+        conn = get_db(db_path)
+        now = datetime.now(timezone.utc).isoformat()
+
+        conn.execute(
+            "INSERT INTO person (id, name, health_engine_user_id, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            ("p1", "NoVO2", "novo2", now, now),
+        )
+        conn.execute(
+            "INSERT INTO wearable_daily "
+            "(id, person_id, date, source, rhr, sleep_hrs, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            ("w1", "p1", "2026-04-01", "garmin", 48.0, 7.5, now, now),
+        )
+        conn.commit()
+
+        from mcp_server.tools import _load_wearable_averages_sqlite
+        with patch("engine.gateway.db._db_path", return_value=db_path):
+            avgs = _load_wearable_averages_sqlite("p1")
+
+        assert avgs["vo2_max"] is None
+        assert avgs["vo2_max_source"] is None
+
+        close_db()
+
+
 class TestPersonContextNoJsonFallback:
     """_get_person_context should get wearable data from SQLite, not JSON files."""
 
