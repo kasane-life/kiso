@@ -93,7 +93,7 @@ class KisoOAuthProvider:
                 "SELECT person_id, used_at FROM oauth_invite WHERE code = ?",
                 (invite_code,),
             ).fetchone()
-            if row and not row["used_at"]:
+            if row:
                 person_id = row["person_id"]
                 # Auto-approve: create auth code and redirect
                 code = await self.create_authorization_code(

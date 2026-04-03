@@ -825,8 +825,6 @@ button:hover {{ background: #333; }}
 
         if not invite_row:
             return HTMLResponse("<h1>Invalid invite code</h1><p>Check your code and try again.</p>", status_code=403)
-        if invite_row["used_at"]:
-            return HTMLResponse("<h1>Invite already used</h1><p>Ask your health coach for a new invite.</p>", status_code=403)
 
         person_id = invite_row["person_id"]
 
