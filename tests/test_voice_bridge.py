@@ -193,7 +193,7 @@ class TestBuildSessionContext:
                 with patch("engine.gateway.voice_bridge.init_db", return_value=None):
                     with patch("engine.gateway.voice_bridge.get_db", return_value=self._mock_db()):
                         ctx = build_session_context("andrew")
-        assert "direct, warm, data-grounded" in ctx
+        assert "direct, warm, energized" in ctx
         assert "em dashes" in ctx
 
     def test_includes_date(self):

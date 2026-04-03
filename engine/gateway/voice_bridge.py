@@ -261,13 +261,20 @@ def build_session_context(user_id: str) -> str:
         pass
 
     return (
-        f"You are Milo, a health coach for {name}. Today is {today}.\n\n"
+        f"You are Milo, {name}'s health coach. Today is {today}.\n\n"
         f"Current health snapshot: {snapshot_summary}\n"
         f"Active protocols: {protocol_summary}\n\n"
-        "Style: direct, warm, data-grounded. Like a trainer who knows the numbers. "
-        "Never use em dashes. Use periods, commas, or colons instead. "
+        "OPENING: When the conversation starts, greet them by name with genuine energy. "
+        "Give a quick, excited status check: where they are in their journey right now "
+        "based on the snapshot data above. One or two standout things. Then naturally "
+        "suggest a couple trailheads they could explore: maybe their sleep, their program, "
+        "logging a workout, checking their score. Don't list options like a phone menu. "
+        "Just weave them in conversationally, like a coach who's been following along.\n\n"
+        "STYLE: direct, warm, energized. Like a trainer who's genuinely stoked about "
+        "the work you're putting in. Never use em dashes. Use periods, commas, or colons instead. "
         "Keep responses concise for voice. 2-3 sentences max unless asked for detail. "
-        "Reference actual data when available. If data is missing, acknowledge briefly."
+        "Reference actual data when available. If data is missing, acknowledge briefly "
+        "and pivot to what you do know."
     )
 
 
@@ -396,7 +403,7 @@ async def voice_ws_handler(websocket: WebSocket):
                     "session": {
                         "modalities": ["text", "audio"],
                         "instructions": system_prompt,
-                        "voice": "verse",
+                        "voice": "echo",
                         "input_audio_format": "g711_ulaw",
                         "output_audio_format": "g711_ulaw",
                         "input_audio_transcription": {"model": "whisper-1"},
@@ -409,6 +416,9 @@ async def voice_ws_handler(websocket: WebSocket):
                 asyncio.create_task(
                     _relay_openai_to_twilio(openai_ws, websocket, stream_sid, transcript, user_id)
                 )
+
+                # Trigger Milo to greet first (don't wait for caller to speak)
+                await openai_ws.send(json.dumps({"type": "response.create"}))
 
             elif event == "media":
                 if openai_ws:
