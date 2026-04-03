@@ -2489,6 +2489,49 @@ def _calendar_search_events(
     return {"events": events, "count": len(events)}
 
 
+def _calendar_update_event(
+    event_id: str,
+    summary: str | None = None,
+    start: str | None = None,
+    end: str | None = None,
+    description: str | None = None,
+    location: str | None = None,
+    calendar_id: str = "primary",
+    user_id: str | None = None,
+) -> dict:
+    """Update an existing calendar event. Only provided fields are changed."""
+    from engine.integrations.gcal import GoogleCalendarClient
+
+    if not user_id:
+        return {"error": "user_id is required."}
+    client = GoogleCalendarClient(user_id=user_id)
+    event = client.update_event(
+        event_id=event_id,
+        summary=summary,
+        start=start,
+        end=end,
+        description=description,
+        location=location,
+        calendar_id=calendar_id,
+    )
+    return {"updated": True, "event": event}
+
+
+def _calendar_delete_event(
+    event_id: str,
+    calendar_id: str = "primary",
+    user_id: str | None = None,
+) -> dict:
+    """Delete a calendar event."""
+    from engine.integrations.gcal import GoogleCalendarClient
+
+    if not user_id:
+        return {"error": "user_id is required."}
+    client = GoogleCalendarClient(user_id=user_id)
+    client.delete_event(event_id=event_id, calendar_id=calendar_id)
+    return {"deleted": True, "event_id": event_id}
+
+
 def _get_api_stats(days: int = 7, user_id: str | None = None) -> dict:
     """Compute API latency stats and error rates from the audit log."""
     audit_path = PROJECT_ROOT / "data" / "admin" / "api_audit.jsonl"
@@ -3581,6 +3624,8 @@ TOOL_REGISTRY = {
     "calendar_list_events": _calendar_list_events,
     "calendar_create_event": _calendar_create_event,
     "calendar_search_events": _calendar_search_events,
+    "calendar_update_event": _calendar_update_event,
+    "calendar_delete_event": _calendar_delete_event,
     "get_api_stats": _get_api_stats,
     "get_skill_ladder": _get_skill_ladder,
     "import_apple_health": _import_apple_health,
@@ -3948,6 +3993,29 @@ def register_tools(mcp: FastMCP):
     ) -> dict:
         """Search Google Calendar events by text. Searches event titles, descriptions, locations, and attendees. Use to find specific events like 'lab retest' or 'training'. Use calendar_id to target a specific calendar."""
         return _calendar_search_events(query, time_min, time_max, max_results, calendar_id, _effective_user_id(user_id))
+
+    @mcp.tool()
+    def calendar_update_event(
+        event_id: str,
+        summary: str | None = None,
+        start: str | None = None,
+        end: str | None = None,
+        description: str | None = None,
+        location: str | None = None,
+        calendar_id: str = "primary",
+        user_id: str | None = None,
+    ) -> dict:
+        """Update an existing Google Calendar event. Only pass the fields you want to change. Get the event_id from calendar_list_events or calendar_search_events first."""
+        return _calendar_update_event(event_id, summary, start, end, description, location, calendar_id, _effective_user_id(user_id))
+
+    @mcp.tool()
+    def calendar_delete_event(
+        event_id: str,
+        calendar_id: str = "primary",
+        user_id: str | None = None,
+    ) -> dict:
+        """Delete a Google Calendar event. Get the event_id from calendar_list_events or calendar_search_events first. This is irreversible."""
+        return _calendar_delete_event(event_id, calendar_id, _effective_user_id(user_id))
 
     @mcp.tool()
     def get_api_stats(days: int = 7, user_id: str | None = None) -> dict:

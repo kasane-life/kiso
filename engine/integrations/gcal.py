@@ -10,7 +10,7 @@ from pathlib import Path
 from engine.gateway.token_store import TokenStore
 
 SERVICE_NAME = "google_calendar"
-SCOPES = ["https://www.googleapis.com/auth/calendar"]
+SCOPES = ["https://www.googleapis.com/auth/calendar.events"]
 DEFAULT_TZ = "America/Los_Angeles"
 
 
@@ -153,6 +153,69 @@ class GoogleCalendarClient:
             query=query,
             calendar_id=calendar_id,
         )
+
+    def update_event(
+        self,
+        event_id: str,
+        summary: str | None = None,
+        start: str | None = None,
+        end: str | None = None,
+        description: str | None = None,
+        location: str | None = None,
+        calendar_id: str = "primary",
+    ) -> dict:
+        """Update an existing calendar event. Only provided fields are changed.
+
+        Args:
+            event_id: The Google Calendar event ID.
+            summary: New event title.
+            start: New start time (ISO 8601 datetime or YYYY-MM-DD).
+            end: New end time (ISO 8601 datetime or YYYY-MM-DD).
+            description: New description.
+            location: New location.
+            calendar_id: Calendar ID (default "primary").
+        """
+        service = self._get_service()
+
+        existing = service.events().get(
+            calendarId=calendar_id, eventId=event_id
+        ).execute()
+
+        if summary is not None:
+            existing["summary"] = summary
+        if start is not None:
+            existing["start"] = _parse_time(start)
+        if end is not None:
+            existing["end"] = _parse_time(end)
+        if description is not None:
+            existing["description"] = description
+        if location is not None:
+            existing["location"] = location
+
+        updated = service.events().update(
+            calendarId=calendar_id, eventId=event_id, body=existing
+        ).execute()
+        return _format_event(updated)
+
+    def delete_event(
+        self,
+        event_id: str,
+        calendar_id: str = "primary",
+    ) -> bool:
+        """Delete a calendar event.
+
+        Args:
+            event_id: The Google Calendar event ID.
+            calendar_id: Calendar ID (default "primary").
+
+        Returns:
+            True if deleted successfully.
+        """
+        service = self._get_service()
+        service.events().delete(
+            calendarId=calendar_id, eventId=event_id
+        ).execute()
+        return True
 
 
 def _parse_time(dt_str: str) -> dict:

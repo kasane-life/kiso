@@ -267,3 +267,121 @@ def test_calendar_search_events_tool(mock_search):
     result = _calendar_search_events(query="Training", user_id="test_user")
     assert result["count"] == 1
     assert result["events"][0]["summary"] == "Training"
+
+
+# --- Scope consistency ---
+
+def test_scope_is_calendar_events():
+    """Scope should be calendar.events (sensitive), not calendar (broad)."""
+    from engine.integrations.gcal import SCOPES
+    assert SCOPES == ["https://www.googleapis.com/auth/calendar.events"]
+
+
+# --- Update event tests ---
+
+@patch("engine.integrations.gcal.GoogleCalendarClient._get_service")
+def test_update_event(mock_get_service, mock_token_store):
+    mock_svc = MagicMock()
+    mock_svc.events.return_value.get.return_value.execute.return_value = {
+        "id": "e1",
+        "summary": "Old title",
+        "start": {"dateTime": "2026-06-26T09:00:00-07:00"},
+        "end": {"dateTime": "2026-06-26T10:00:00-07:00"},
+        "status": "confirmed",
+    }
+    mock_svc.events.return_value.update.return_value.execute.return_value = {
+        "id": "e1",
+        "summary": "New title",
+        "start": {"dateTime": "2026-06-26T09:00:00-07:00"},
+        "end": {"dateTime": "2026-06-26T10:00:00-07:00"},
+        "status": "confirmed",
+    }
+    mock_get_service.return_value = mock_svc
+
+    client = GoogleCalendarClient(user_id="default", token_store=mock_token_store)
+    result = client.update_event(event_id="e1", summary="New title")
+
+    assert result["summary"] == "New title"
+    mock_svc.events.return_value.update.assert_called_once()
+
+
+@patch("engine.integrations.gcal.GoogleCalendarClient._get_service")
+def test_update_event_partial(mock_get_service, mock_token_store):
+    """Only provided fields should change."""
+    mock_svc = MagicMock()
+    existing = {
+        "id": "e1",
+        "summary": "Training",
+        "start": {"dateTime": "2026-06-26T15:00:00-07:00"},
+        "end": {"dateTime": "2026-06-26T16:30:00-07:00"},
+        "location": "Pacific Strength",
+        "status": "confirmed",
+    }
+    mock_svc.events.return_value.get.return_value.execute.return_value = existing.copy()
+    mock_svc.events.return_value.update.return_value.execute.return_value = {
+        **existing, "location": "Home gym"
+    }
+    mock_get_service.return_value = mock_svc
+
+    client = GoogleCalendarClient(user_id="default", token_store=mock_token_store)
+    result = client.update_event(event_id="e1", location="Home gym")
+
+    assert result["location"] == "Home gym"
+    assert result["summary"] == "Training"  # unchanged
+
+
+# --- Delete event tests ---
+
+@patch("engine.integrations.gcal.GoogleCalendarClient._get_service")
+def test_delete_event(mock_get_service, mock_token_store):
+    mock_svc = MagicMock()
+    mock_svc.events.return_value.delete.return_value.execute.return_value = None
+    mock_get_service.return_value = mock_svc
+
+    client = GoogleCalendarClient(user_id="default", token_store=mock_token_store)
+    result = client.delete_event(event_id="e1")
+
+    assert result is True
+    mock_svc.events.return_value.delete.assert_called_once()
+
+
+# --- Tool wrapper tests for update/delete ---
+
+@patch("engine.integrations.gcal.GoogleCalendarClient.update_event")
+def test_calendar_update_event_tool(mock_update):
+    from mcp_server.tools import _calendar_update_event
+
+    mock_update.return_value = {"id": "e1", "summary": "Updated"}
+    result = _calendar_update_event(event_id="e1", summary="Updated", user_id="test_user")
+    assert result["updated"] is True
+    assert result["event"]["summary"] == "Updated"
+
+
+@patch("engine.integrations.gcal.GoogleCalendarClient.delete_event")
+def test_calendar_delete_event_tool(mock_delete):
+    from mcp_server.tools import _calendar_delete_event
+
+    mock_delete.return_value = True
+    result = _calendar_delete_event(event_id="e1", user_id="test_user")
+    assert result["deleted"] is True
+    assert result["event_id"] == "e1"
+
+
+def test_calendar_update_requires_user_id():
+    from mcp_server.tools import _calendar_update_event
+    result = _calendar_update_event(event_id="e1", summary="Test")
+    assert "error" in result
+
+
+def test_calendar_delete_requires_user_id():
+    from mcp_server.tools import _calendar_delete_event
+    result = _calendar_delete_event(event_id="e1")
+    assert "error" in result
+
+
+def test_update_delete_in_tool_registry():
+    from mcp_server.tools import TOOL_REGISTRY, _calendar_update_event, _calendar_delete_event
+    assert "calendar_update_event" in TOOL_REGISTRY
+    assert TOOL_REGISTRY["calendar_update_event"] is _calendar_update_event
+    assert "calendar_delete_event" in TOOL_REGISTRY
+    assert TOOL_REGISTRY["calendar_delete_event"] is _calendar_delete_event
