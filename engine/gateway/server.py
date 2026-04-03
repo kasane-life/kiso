@@ -967,6 +967,18 @@ button:hover {{ background: #333; }}
             validate_token=_validate_token,
         )
         app.mount("/mcp", authed_mcp_app)
+
+        # Redirect /mcp to /mcp/ (Claude.ai hits /mcp without trailing slash)
+        from starlette.responses import RedirectResponse as _McpRedirect
+        @app.api_route("/mcp", methods=["GET", "POST", "PUT", "DELETE", "PATCH"], include_in_schema=False)
+        async def mcp_redirect(request: Request):
+            url = str(request.url)
+            # Preserve query string
+            if "?" in url:
+                path, qs = url.rsplit("?", 1)
+                return _McpRedirect(url=f"{path}/?{qs}", status_code=307)
+            return _McpRedirect(url=f"{url}/", status_code=307)
+
         logger.info("MCP streamable-http mounted at /mcp")
 
         # --- OAuth routes for Claude iOS/cloud MCP auth ---
