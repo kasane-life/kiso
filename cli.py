@@ -190,7 +190,13 @@ def cmd_auth(args):
                 "consider removing them (credentials should not be stored in config)."
             )
         token_dir = garmin_cfg.get("token_dir")
-        GarminClient.auth_interactive(token_dir=token_dir)
+        # Sync tokens to SQLite after interactive auth
+        from engine.gateway.db import init_db
+        from engine.gateway.token_store import TokenStore
+        init_db()
+        ts = TokenStore()
+        user_id = getattr(args, "user", None) or "default"
+        GarminClient.auth_interactive(token_dir=token_dir, token_store=ts, user_id=user_id)
     elif args.service == "google-calendar":
         from engine.integrations.gcal_auth import run_auth_flow
         if not args.secrets:

@@ -525,6 +525,57 @@ class TestGarminClientTokenStore:
         # Tokens should be in SQLite now
         assert store.has_token("garmin", "andrew")
 
+    def test_auth_interactive_syncs_to_store(self, store, tmp_path):
+        """auth_interactive with token_store syncs tokens to SQLite."""
+        cache_dir = tmp_path / "garth-cache" / "andrew"
+        cache_dir.mkdir(parents=True)
+
+        mock_garth = type("MockGarth", (), {
+            "dump": lambda self, d: (
+                Path(d).mkdir(parents=True, exist_ok=True),
+                (Path(d) / "oauth1_token.json").write_text('{"t": "1"}'),
+                (Path(d) / "oauth2_token.json").write_text('{"t": "2"}'),
+            ),
+        })()
+        mock_garmin = type("MockGarmin", (), {
+            "garth": mock_garth,
+            "login": lambda self: None,
+        })()
+
+        with patch("garminconnect.Garmin", return_value=mock_garmin), \
+             patch("builtins.input", return_value="test@example.com"), \
+             patch("getpass.getpass", return_value="password"):
+            GarminClient.auth_interactive(
+                token_dir=str(cache_dir),
+                token_store=store,
+                user_id="andrew",
+            )
+
+        assert store.has_token("garmin", "andrew")
+
+    def test_auth_interactive_without_store(self, tmp_path):
+        """auth_interactive without token_store still works (backward compat)."""
+        token_dir = tmp_path / "tokens"
+
+        mock_garth = type("MockGarth", (), {
+            "dump": lambda self, d: (
+                Path(d).mkdir(parents=True, exist_ok=True),
+                (Path(d) / "oauth1_token.json").write_text('{"t": "1"}'),
+            ),
+        })()
+        mock_garmin = type("MockGarmin", (), {
+            "garth": mock_garth,
+            "login": lambda self: None,
+        })()
+
+        with patch("garminconnect.Garmin", return_value=mock_garmin), \
+             patch("builtins.input", return_value="test@example.com"), \
+             patch("getpass.getpass", return_value="password"):
+            result = GarminClient.auth_interactive(token_dir=str(token_dir))
+
+        assert result is True
+        assert (token_dir / "oauth1_token.json").exists()
+
     def test_connect_without_store_no_sync(self, tmp_path):
         """connect() without token_store doesn't crash (backward compat)."""
         token_dir = tmp_path / "tokens"

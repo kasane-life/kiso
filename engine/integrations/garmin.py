@@ -91,7 +91,7 @@ class GarminClient:
         return legacy.exists() and any(legacy.iterdir())
 
     @classmethod
-    def auth_interactive(cls, token_dir: str | None = None) -> bool:
+    def auth_interactive(cls, token_dir: str | None = None, token_store=None, user_id: str = "default") -> bool:
         """Interactive CLI auth — prompts for email/password, caches tokens."""
         from garminconnect import Garmin
 
@@ -104,6 +104,8 @@ class GarminClient:
         client.login()
         td.mkdir(parents=True, exist_ok=True)
         client.garth.dump(str(td))
+        if token_store:
+            token_store.sync_garmin_tokens(user_id)
         print("Authenticated and tokens cached. Credentials are NOT stored.")
         return True
 
