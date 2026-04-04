@@ -182,6 +182,15 @@ class TestValidateCoachingClaims:
 class TestValidationInScheduler:
     """Verify that _run_schedule annotates messages when source changes are detected."""
 
+    @pytest.fixture(autouse=True)
+    def mock_wearable_connected(self):
+        from unittest.mock import MagicMock
+        with patch("engine.gateway.scheduler._get_token_store") as mock_ts:
+            ts = MagicMock()
+            ts.has_token.return_value = True
+            mock_ts.return_value = ts
+            yield mock_ts
+
     @patch("engine.gateway.scheduler._compose_message", return_value="Your VO2 max dropped to 32. Concerning decline.")
     @patch("engine.gateway.scheduler._gather_context", return_value={"checkin": {"test": True}})
     @patch("engine.gateway.scheduler._user_local_now")

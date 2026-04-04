@@ -231,6 +231,16 @@ class TestEligiblePersons:
 class TestRunSchedule:
     """Test _run_schedule with mocked composition and delivery."""
 
+    @pytest.fixture(autouse=True)
+    def mock_wearable_connected(self):
+        """Default: simulate connected wearable so tests don't get connect links appended."""
+        from unittest.mock import MagicMock
+        with patch("engine.gateway.scheduler._get_token_store") as mock_ts:
+            ts = MagicMock()
+            ts.has_token.return_value = True
+            mock_ts.return_value = ts
+            yield mock_ts
+
     @patch("engine.gateway.scheduler._compose_message", return_value="Test morning brief message")
     @patch("engine.gateway.scheduler._gather_context", return_value={"checkin": {"test": True}})
     @patch("engine.gateway.scheduler._user_local_now")
@@ -523,6 +533,15 @@ class TestConversationIngestion:
 
 class TestConversationDedup:
     """Verify that duplicate messages within 60s are skipped."""
+
+    @pytest.fixture(autouse=True)
+    def mock_wearable_connected(self):
+        from unittest.mock import MagicMock
+        with patch("engine.gateway.scheduler._get_token_store") as mock_ts:
+            ts = MagicMock()
+            ts.has_token.return_value = True
+            mock_ts.return_value = ts
+            yield mock_ts
 
     @patch("engine.gateway.scheduler._compose_message", return_value="Good morning! Here's your brief.")
     @patch("engine.gateway.scheduler._gather_context", return_value={})
