@@ -219,6 +219,13 @@ When a user asks "why do you measure this?" or "how does scoring work?", referen
 | `docs/ONBOARDING.md` | New users | Setup walkthrough |
 | `docs/DATA_FORMATS.md` | Contributors | CSV/JSON schemas |
 
+# Project-specific rules
+- gunicorn preload_app must be False. Python 3.14 + native extensions SIGSEGV on fork. (learned 2026-04-03)
+- Twilio <Stream> strips WebSocket query params. Pass user context via <Parameter> tags, read from start event customParameters. (learned 2026-04-03)
+- OpenAI Realtime API voices differ from TTS API. Onyx/fable unavailable. Valid: alloy, ash, ballad, coral, echo, sage, shimmer, verse, marin, cedar. (learned 2026-04-03)
+- Voice context: use _checkin not _get_daily_snapshot. Snapshot needs live Garmin auth which may fail. Checkin has all the data from SQLite. (learned 2026-04-03)
+- Voice transcripts: save raw turns + Haiku summary. _get_conversations filters raw voice turns, shows only milo-voice-summary rows to text-based Milo. (learned 2026-04-03)
+
 # Cost Control — HARD RULE
 NEVER use Opus for automated/cron/background tasks. Use Haiku for routine operations (check-ins, log parsing, cron jobs). Use Sonnet only for complex reasoning (compound pattern detection, onboarding synthesis). Opus is reserved for interactive human sessions only. Monitor API costs weekly at console.anthropic.com. If monthly API spend exceeds $50, alert Andrew immediately.
 
@@ -233,3 +240,8 @@ Source: mariozechner.at/posts/2026-03-25-thoughts-on-slowing-the-fuck-down/
 6. Use sub-agents only for truly independent 30+ minute tasks. Everything else, do directly.
 7. No cargo cult architecture. No abstractions that do not serve the current problem.
 8. Before any build: what problem does this solve? How will we know it worked?
+
+## Session Retros
+
+- tools.py uses lazy imports (`from engine.gateway.db import get_db` inside functions). To mock in tests, patch `engine.gateway.db.get_db`, not `mcp_server.tools.get_db`. (learned 2026-04-03)
+- Google Calendar OAuth scope is `calendar.events` (sensitive, free verification), not `calendar` (broad). Both gcal.py and server.py must match. (learned 2026-04-03)

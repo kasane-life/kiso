@@ -421,10 +421,9 @@ def _checkin(greeting: str = "morning check-in", user_id: str | None = None) -> 
     # Pull fresh Garmin data before building the briefing
     garmin_pull_error = None
     try:
-        from engine.integrations.garmin import GarminClient
-        config_pre = _load_config(user_id)
-        garmin_cfg = config_pre.get("garmin", {})
-        if GarminClient.has_tokens(token_dir=garmin_cfg.get("token_dir")):
+        ts = _get_token_store()
+        uid = user_id if user_id and user_id != "default" else "default"
+        if ts.has_token("garmin", uid):
             result = _pull_garmin(user_id=user_id)
             if not result.get("pulled"):
                 garmin_pull_error = result.get("error", "Unknown error")
@@ -1571,8 +1570,10 @@ def _pull_garmin(history: bool = False, workouts: bool = False, user_id: str | N
             "hint": f"Send them the auth link: connect_wearable(service='garmin', user_id='{user_id}')",
         }
     config.setdefault("garmin", {})["token_dir"] = token_dir
+    uid = user_id if user_id and user_id != "default" else "default"
+    ts = _get_token_store()
     try:
-        client = GarminClient.from_config(config)
+        client = GarminClient.from_config(config, token_store=ts, user_id=uid)
         person_id = _resolve_person_id(user_id)
         result = client.pull_all(
             history=history,
@@ -1581,9 +1582,9 @@ def _pull_garmin(history: bool = False, workouts: bool = False, user_id: str | N
             workout_days=7,
             person_id=person_id,
         )
-        # Sync any token refreshes back to SQLite
-        uid = user_id if user_id and user_id != "default" else "default"
-        _get_token_store().sync_garmin_tokens(uid)
+        # GarminClient.connect() now syncs via _sync_to_store() automatically,
+        # but also sync after pull_all in case garth refreshed mid-pull.
+        ts.sync_garmin_tokens(uid)
 
         from engine.coaching.briefing import build_briefing
         briefing = build_briefing(config)

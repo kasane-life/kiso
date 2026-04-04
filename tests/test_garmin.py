@@ -6,6 +6,8 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from engine.integrations.garmin import GarminClient, DEFAULT_EXERCISE_MAP
 
 
@@ -447,6 +449,107 @@ class TestPullAllHistoryBackfill:
 
 
 # --- Sleep time timezone tests ---
+
+class TestGarminClientTokenStore:
+    """Step 2: GarminClient uses TokenStore for token lifecycle."""
+
+    @pytest.fixture
+    def test_db(self, tmp_path):
+        from engine.gateway.db import init_db, get_db, close_db
+        close_db()
+        db_path = tmp_path / "kasane.db"
+        init_db(db_path)
+        yield db_path
+        close_db()
+
+    @pytest.fixture
+    def store(self, tmp_path, test_db, monkeypatch):
+        garth_cache = tmp_path / "garth-cache"
+        monkeypatch.setattr("engine.gateway.token_store._GARTH_CACHE_DIR", garth_cache)
+        monkeypatch.setattr("engine.gateway.token_store._LEGACY_BASE_DIR", tmp_path / "legacy")
+        monkeypatch.setattr(
+            "engine.gateway.token_store._get_db",
+            lambda: __import__("engine.gateway.db", fromlist=["get_db"]).get_db(test_db),
+        )
+        from engine.gateway.token_store import TokenStore
+        return TokenStore(base_dir=tmp_path / "legacy")
+
+    def test_init_accepts_token_store(self, store):
+        """GarminClient.__init__ accepts token_store and user_id params."""
+        client = GarminClient(token_store=store, user_id="andrew")
+        assert client.token_store is store
+        assert client.user_id == "andrew"
+
+    def test_init_without_token_store(self):
+        """GarminClient still works without token_store (backward compat)."""
+        client = GarminClient()
+        assert client.token_store is None
+        assert client.user_id == "default"
+
+    def test_from_config_passes_token_store(self, store):
+        """from_config forwards token_store and user_id."""
+        config = {"garmin": {"token_dir": "/tmp/test"}, "data_dir": "/tmp/data"}
+        client = GarminClient.from_config(config, token_store=store, user_id="andrew")
+        assert client.token_store is store
+        assert client.user_id == "andrew"
+
+    def test_connect_syncs_to_store_after_refresh(self, store, tmp_path):
+        """After garth.dump() in connect(), tokens are synced to SQLite."""
+        # Seed garth-cache with token files so connect() has something to load
+        cache_dir = tmp_path / "garth-cache" / "andrew"
+        cache_dir.mkdir(parents=True)
+        (cache_dir / "oauth1_token.json").write_text('{"token": "o1"}')
+        (cache_dir / "oauth2_token.json").write_text('{"access": "a", "refresh": "r"}')
+
+        # Pre-populate the store so garmin_token_dir returns the cache
+        store._import_garth_cache("andrew")
+
+        token_dir = str(store.garmin_token_dir("andrew"))
+        client = GarminClient(token_dir=token_dir, token_store=store, user_id="andrew")
+
+        # Mock garth interactions in connect()
+        mock_garth = type("MockGarth", (), {
+            "load": lambda self, d: None,
+            "dump": lambda self, d: None,
+            "oauth2_token": type("T", (), {"expired": False, "refresh_expired": False})(),
+            "profile": {"displayName": "TestUser"},
+        })()
+        mock_garmin = type("MockGarmin", (), {
+            "garth": mock_garth,
+            "display_name": None,
+        })()
+
+        with patch("garminconnect.Garmin", return_value=mock_garmin):
+            client.connect()
+
+        # Tokens should be in SQLite now
+        assert store.has_token("garmin", "andrew")
+
+    def test_connect_without_store_no_sync(self, tmp_path):
+        """connect() without token_store doesn't crash (backward compat)."""
+        token_dir = tmp_path / "tokens"
+        token_dir.mkdir()
+        (token_dir / "oauth1_token.json").write_text('{"token": "o1"}')
+        (token_dir / "oauth2_token.json").write_text('{"access": "a"}')
+
+        client = GarminClient(token_dir=str(token_dir))
+
+        mock_garth = type("MockGarth", (), {
+            "load": lambda self, d: None,
+            "dump": lambda self, d: None,
+            "oauth2_token": type("T", (), {"expired": False, "refresh_expired": False})(),
+            "profile": {"displayName": "TestUser"},
+        })()
+        mock_garmin = type("MockGarmin", (), {
+            "garth": mock_garth,
+            "display_name": None,
+        })()
+
+        with patch("garminconnect.Garmin", return_value=mock_garmin):
+            client.connect()
+        # No crash, no store to sync to
+        assert client.token_store is None
+
 
 class TestSleepTimeTimezone:
     """Verify sleep_start/sleep_end are extracted correctly from Garmin timestamps.

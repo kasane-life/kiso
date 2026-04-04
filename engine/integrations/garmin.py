@@ -41,6 +41,8 @@ class GarminClient:
         token_dir: Optional[str] = None,
         exercise_map: Optional[dict] = None,
         data_dir: Optional[str] = None,
+        token_store=None,
+        user_id: str = "default",
     ):
         self.email = email or os.environ.get("GARMIN_EMAIL")
         self.password = password or os.environ.get("GARMIN_PASSWORD")
@@ -54,9 +56,11 @@ class GarminClient:
         self.exercise_map = exercise_map or DEFAULT_EXERCISE_MAP
         self.data_dir = Path(data_dir or "./data")
         self._client = None
+        self.token_store = token_store
+        self.user_id = user_id
 
     @classmethod
-    def from_config(cls, config: dict) -> "GarminClient":
+    def from_config(cls, config: dict, token_store=None, user_id: str = "default") -> "GarminClient":
         """Create a GarminClient from a parsed config.yaml dict."""
         garmin_cfg = config.get("garmin", {})
         # Deprecation warning for plaintext credentials in config
@@ -72,6 +76,8 @@ class GarminClient:
             token_dir=garmin_cfg.get("token_dir"),
             exercise_map=config.get("exercise_name_map"),
             data_dir=config.get("data_dir"),
+            token_store=token_store,
+            user_id=user_id,
         )
 
     @classmethod
@@ -101,6 +107,11 @@ class GarminClient:
         print("Authenticated and tokens cached. Credentials are NOT stored.")
         return True
 
+    def _sync_to_store(self):
+        """Sync garth-cache tokens back to SQLite if token_store is set."""
+        if self.token_store:
+            self.token_store.sync_garmin_tokens(self.user_id)
+
     def connect(self):
         """Authenticate with Garmin Connect.
 
@@ -127,6 +138,7 @@ class GarminClient:
                         print("Access token expired, refreshing via refresh token...", file=sys.stderr)
                         client.garth.refresh_oauth2()
                         client.garth.dump(str(self.token_dir))
+                        self._sync_to_store()
                         print("Token refreshed successfully.")
 
                 dn = (client.garth.profile.get("displayName")
@@ -138,6 +150,7 @@ class GarminClient:
                     raise RuntimeError("No display name in cached profile")
                 # Persist any token changes from auto-refresh
                 client.garth.dump(str(self.token_dir))
+                self._sync_to_store()
                 print("Authenticated with cached token.")
                 self._client = client
                 return client
@@ -160,6 +173,7 @@ class GarminClient:
         client.login()
         self.token_dir.mkdir(parents=True, exist_ok=True)
         client.garth.dump(str(self.token_dir))
+        self._sync_to_store()
         print("Authenticated and token cached.")
         self._client = client
         return client
