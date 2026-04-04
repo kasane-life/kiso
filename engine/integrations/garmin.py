@@ -234,7 +234,7 @@ class GarminClient:
                     dto = sleep.get("dailySleepDTO", {})
                     ts = dto.get("sleepStartTimestampLocal")
                     if ts:
-                        dt = datetime.fromtimestamp(ts / 1000)
+                        dt = datetime.utcfromtimestamp(ts / 1000)
                         minutes = dt.hour * 60 + dt.minute
                         if minutes < 720:
                             minutes += 1440
@@ -473,7 +473,7 @@ class GarminClient:
                         entry["sleep_hrs"] = round(secs / 3600, 1)
                     ts = dto.get("sleepStartTimestampLocal")
                     if ts:
-                        start_dt = datetime.fromtimestamp(ts / 1000)
+                        start_dt = datetime.utcfromtimestamp(ts / 1000)
                         entry["sleep_start"] = start_dt.strftime("%H:%M")
                         if secs and secs > 0:
                             end_dt = start_dt + timedelta(seconds=secs)
@@ -675,7 +675,7 @@ class GarminClient:
                     entry["awake_hrs"] = round(awake / 3600, 1)
                 ts = dto.get("sleepStartTimestampLocal")
                 if ts:
-                    start_dt = datetime.fromtimestamp(ts / 1000)
+                    start_dt = datetime.utcfromtimestamp(ts / 1000)
                     entry["sleep_start"] = start_dt.strftime("%H:%M")
                     if secs and secs > 0:
                         end_dt = start_dt + timedelta(seconds=secs)

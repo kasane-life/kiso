@@ -2,7 +2,7 @@
 
 import json
 import sqlite3
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -444,3 +444,100 @@ class TestPullAllHistoryBackfill:
             client.pull_all(history=True, history_days=3, person_id="p-andrew")
 
         mock_backfill.assert_called_once_with(person_id="p-andrew")
+
+
+# --- Sleep time timezone tests ---
+
+class TestSleepTimeTimezone:
+    """Verify sleep_start/sleep_end are extracted correctly from Garmin timestamps.
+
+    Garmin's sleepStartTimestampLocal is a UTC epoch representing local wall-clock
+    time. Using datetime.fromtimestamp() double-converts by applying the system
+    timezone offset. The fix: use datetime.utcfromtimestamp().
+    """
+
+    def _make_client(self, tmp_path):
+        data_dir = tmp_path / "data" / "users" / "andrew"
+        data_dir.mkdir(parents=True)
+        client = GarminClient(data_dir=str(data_dir))
+        from unittest.mock import MagicMock
+        client._client = MagicMock()
+        return client
+
+    def _garmin_sleep_dto(self, hour=22, minute=30, sleep_secs=25200):
+        """Build a Garmin sleep DTO with sleepStartTimestampLocal.
+
+        The timestamp represents local wall-clock time encoded as UTC epoch.
+        hour=22, minute=30 means the user went to bed at 10:30 PM local.
+        sleep_secs=25200 means 7 hours of sleep.
+        """
+        # Garmin encodes local time as a UTC timestamp
+        ts = int(datetime(2026, 4, 3, hour, minute, tzinfo=timezone.utc).timestamp() * 1000)
+        return {
+            "dailySleepDTO": {
+                "sleepStartTimestampLocal": ts,
+                "sleepTimeSeconds": sleep_secs,
+                "deepSleepSeconds": 3600,
+                "lightSleepSeconds": 10800,
+                "remSleepSeconds": 7200,
+                "awakeSleepSeconds": 3600,
+            }
+        }
+
+    def test_pull_day_snapshot_sleep_times(self, tmp_path):
+        """_pull_day_snapshot should extract correct local sleep times."""
+        client = self._make_client(tmp_path)
+        sleep_dto = self._garmin_sleep_dto(hour=22, minute=30, sleep_secs=22320)
+
+        client._client.get_stats.return_value = {}
+        client._client.get_sleep_data.return_value = sleep_dto
+        client._client.get_hrv_data.return_value = {}
+
+        result = client._pull_day_snapshot("2026-04-03")
+
+        assert result["sleep_start"] == "22:30", f"Expected 22:30, got {result['sleep_start']}"
+        assert result["sleep_end"] == "04:42", f"Expected 04:42, got {result['sleep_end']}"
+
+    def test_pull_daily_series_sleep_times(self, tmp_path):
+        """pull_daily_series should extract correct local sleep times."""
+        client = self._make_client(tmp_path)
+        sleep_dto = self._garmin_sleep_dto(hour=23, minute=0, sleep_secs=25200)
+
+        client._client.get_stats.return_value = {}
+        client._client.get_rhr_day.return_value = {}
+        client._client.get_hrv_data.return_value = {}
+        client._client.get_sleep_data.return_value = sleep_dto
+
+        with patch("engine.integrations.garmin.time.sleep"):
+            with patch("engine.integrations.garmin.date") as mock_date:
+                mock_date.today.return_value = date(2026, 4, 3)
+                mock_date.side_effect = lambda *a, **k: date(*a, **k)
+                series = client.pull_daily_series(days=1)
+
+        assert len(series) == 1
+        assert series[0]["sleep_start"] == "23:00", f"Expected 23:00, got {series[0]['sleep_start']}"
+        assert series[0]["sleep_end"] == "06:00", f"Expected 06:00, got {series[0]['sleep_end']}"
+
+    def test_sleep_regularity_uses_correct_times(self, tmp_path):
+        """pull_sleep_regularity should compute bedtime stdev from correct times."""
+        client = self._make_client(tmp_path)
+
+        # Two nights: 10:30 PM and 11:00 PM (30 min apart -> stdev ~21.2 min)
+        sleep_dtos = [
+            self._garmin_sleep_dto(hour=22, minute=30),
+            self._garmin_sleep_dto(hour=23, minute=0),
+        ]
+        call_count = [0]
+
+        def mock_get_sleep(d):
+            idx = min(call_count[0], len(sleep_dtos) - 1)
+            call_count[0] += 1
+            return sleep_dtos[idx]
+
+        client._client.get_sleep_data.side_effect = mock_get_sleep
+
+        with patch("engine.integrations.garmin.time.sleep"):
+            result = client.pull_sleep_regularity(days=2)
+
+        assert result is not None
+        assert 20 < result < 23, f"Expected stdev ~21.2, got {result}"
