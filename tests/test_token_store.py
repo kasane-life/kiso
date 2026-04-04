@@ -141,3 +141,53 @@ def test_env_var_key(token_dir, monkeypatch):
     assert f is not None
     ct = f.encrypt(b"test")
     assert f.decrypt(ct) == b"test"
+
+
+# --- Garth-cache fallback tests ---
+
+
+@pytest.fixture
+def garth_cache_dir(tmp_path, monkeypatch):
+    """Patch _GARTH_CACHE_DIR to a temp location."""
+    cache = tmp_path / "garth-cache"
+    monkeypatch.setattr("engine.gateway.token_store._GARTH_CACHE_DIR", cache)
+    return cache
+
+
+def test_has_token_garth_cache_fallback(store_encrypted, garth_cache_dir, test_db):
+    """has_token returns True when SQLite is empty but garth-cache has tokens."""
+    # SQLite is empty
+    assert not store_encrypted.has_token("garmin", "andrew")
+
+    # Create garth-cache tokens (as garth would)
+    user_cache = garth_cache_dir / "andrew"
+    user_cache.mkdir(parents=True)
+    (user_cache / "oauth1_token.json").write_text('{"token": "o1"}')
+    (user_cache / "oauth2_token.json").write_text('{"token": "o2"}')
+
+    # Now has_token should find them and import to SQLite
+    assert store_encrypted.has_token("garmin", "andrew")
+
+    # Verify they were imported into SQLite (subsequent call doesn't need cache)
+    from engine.gateway.db import get_db
+    db = get_db(test_db)
+    count = db.execute(
+        "SELECT COUNT(*) as cnt FROM wearable_token WHERE user_id = 'andrew' AND service = 'garmin'"
+    ).fetchone()["cnt"]
+    assert count == 2
+
+
+def test_has_token_no_garth_cache(store_encrypted, garth_cache_dir):
+    """has_token returns False when both SQLite and garth-cache are empty."""
+    assert not store_encrypted.has_token("garmin", "andrew")
+
+
+def test_has_token_garth_cache_non_garmin(store_encrypted, garth_cache_dir):
+    """Garth-cache fallback only applies to garmin, not other services."""
+    # Create a garth-cache dir for oura (shouldn't exist, but test the guard)
+    user_cache = garth_cache_dir / "andrew"
+    user_cache.mkdir(parents=True)
+    (user_cache / "oauth1_token.json").write_text('{"token": "o1"}')
+
+    # oura should NOT use garth-cache fallback
+    assert not store_encrypted.has_token("oura", "andrew")

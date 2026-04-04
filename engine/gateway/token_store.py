@@ -184,9 +184,36 @@ class TokenStore:
         return json.loads(raw)
 
     def has_token(self, service: str, user_id: str) -> bool:
-        """Check if tokens exist for a service/user combo."""
+        """Check if tokens exist for a service/user combo.
+
+        Checks SQLite first (after legacy migration). For Garmin, falls back
+        to garth-cache directory: if tokens exist there but not in SQLite,
+        imports them and returns True.
+        """
         self._migrate_from_files(user_id, service)
-        return self._db_has_tokens(user_id, service)
+        if self._db_has_tokens(user_id, service):
+            return True
+        # Fallback: garth-cache may have tokens from direct garth usage
+        # (e.g. CLI auth) that were never synced to SQLite.
+        if service == "garmin":
+            cache_dir = _GARTH_CACHE_DIR / user_id
+            if cache_dir.exists() and any(cache_dir.glob("oauth*.json")):
+                self._import_garth_cache(user_id)
+                return self._db_has_tokens(user_id, service)
+        return False
+
+    def _import_garth_cache(self, user_id: str):
+        """Import garth-cache tokens into SQLite."""
+        cache_dir = _GARTH_CACHE_DIR / user_id
+        imported = 0
+        for fpath in cache_dir.iterdir():
+            if not fpath.is_file() or not fpath.name.endswith(".json"):
+                continue
+            raw = fpath.read_bytes()
+            self._db_save_token(user_id, "garmin", fpath.name, raw)
+            imported += 1
+        if imported:
+            logger.info("Imported %d garth-cache tokens for user %s into SQLite", imported, user_id)
 
     def garmin_token_dir(self, user_id: str = "default") -> Path:
         """Get a garth-compatible token directory for Garmin.
