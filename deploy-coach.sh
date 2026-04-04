@@ -3,9 +3,10 @@ set -euo pipefail
 
 # Deploy workspace files to Mac Mini, reset sessions, and verify routing.
 # Usage:
-#   ./deploy-coach.sh [workspace] --reset <phone>   # Copy files + reset one user
-#   ./deploy-coach.sh [workspace] --reset all        # Copy files + reset all users
-#   ./deploy-coach.sh [workspace]                    # Copy files + restart gateway
+#   ./deploy-coach.sh [workspace]                    # Copy files + reset all sessions (default)
+#   ./deploy-coach.sh [workspace] --reset <phone>    # Copy files + reset one user
+#   ./deploy-coach.sh [workspace] --reset all        # Copy files + reset all sessions (explicit)
+#   ./deploy-coach.sh [workspace] --cold             # Copy files + full gateway restart (OpenClaw code changes only)
 
 WORKSPACE_DIR="${1:-$(dirname "$0")/workspace}"
 REMOTE="mac-mini"
@@ -49,27 +50,37 @@ scp "${FILES[@]}" "$REMOTE:$REMOTE_WORKSPACE"
 echo "Files copied."
 echo ""
 
-# Reset specific user sessions or restart gateway
-if [ "${2:-}" = "--reset" ]; then
-    PHONE="${3:-}"
-    if [ -z "$PHONE" ]; then
-        echo "Usage: ./deploy-coach.sh [workspace_dir] --reset <phone>"
-        echo "       ./deploy-coach.sh [workspace_dir] --reset all"
-        exit 1
-    fi
+# Determine reset mode:
+#   default (no flag)       -> reset all sessions (no gateway restart)
+#   --reset <phone>         -> reset one user session
+#   --reset all             -> reset all sessions (explicit)
+#   --cold                  -> full gateway restart (only for OpenClaw code changes)
 
-    if [ "$PHONE" = "all" ]; then
-        echo "Resetting ALL user sessions..."
-        ssh "$REMOTE" "$REMOTE_PATH; openclaw sessions --json 2>/dev/null | python3 -c \"
+_reset_all_sessions() {
+    echo "Resetting all user sessions..."
+    ssh "$REMOTE" "$REMOTE_PATH; openclaw sessions --json 2>/dev/null | python3 -c \"
 import json, sys
 d = json.load(sys.stdin)
 for s in d['sessions']:
     if ':direct:' in s['key']:
         print(s['key'])
 \"" | while read -r key; do
-            echo "  Resetting: $key"
-            ssh "$REMOTE" "$REMOTE_PATH; openclaw gateway call sessions.reset --params '{\"key\": \"$key\"}' 2>/dev/null"
-        done
+        echo "  Resetting: $key"
+        ssh "$REMOTE" "$REMOTE_PATH; openclaw gateway call sessions.reset --params '{\"key\": \"$key\"}' 2>/dev/null"
+    done
+    echo ""
+    echo "Deploy complete. All sessions reset. Next message picks up new files."
+}
+
+if [ "${2:-}" = "--cold" ]; then
+    echo "Cold restarting gateway (use only for OpenClaw code changes)..."
+    ssh "$REMOTE" "$REMOTE_PATH; openclaw gateway stop && sleep 3 && openclaw gateway install"
+    echo ""
+    echo "Deploy complete. Gateway restarted."
+elif [ "${2:-}" = "--reset" ]; then
+    PHONE="${3:-all}"
+    if [ "$PHONE" = "all" ]; then
+        _reset_all_sessions
     else
         # Accept full session keys (e.g. agent:main:telegram:direct:80135247)
         # or phone numbers (defaults to whatsapp:direct)
@@ -80,18 +91,12 @@ for s in d['sessions']:
         fi
         echo "Resetting session: $SESSION_KEY"
         ssh "$REMOTE" "$REMOTE_PATH; openclaw gateway call sessions.reset --params '{\"key\": \"$SESSION_KEY\"}'"
+        echo ""
+        echo "Deploy complete. Session reset. Next message picks up new files."
     fi
-    echo ""
-    echo "Deploy complete. Session(s) reset. Next message picks up new files."
 else
-    echo "Restarting gateway..."
-    ssh "$REMOTE" "$REMOTE_PATH; openclaw gateway stop && sleep 3 && openclaw gateway install"
-    echo ""
-    echo "Deploy complete. All sessions reset (gateway restarted)."
-    echo ""
-    echo "Tip: Use --reset <phone> to reset one user without restarting:"
-    echo "  ./deploy-coach.sh --reset +14152009584"
-    echo "  ./deploy-coach.sh --reset all"
+    # Default: reset all sessions without gateway restart
+    _reset_all_sessions
 fi
 
 # Sign shortcuts on Mac Mini (runs natively, not in Docker)
