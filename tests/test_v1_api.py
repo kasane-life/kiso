@@ -723,7 +723,7 @@ _TEST_RSA_KEY = rsa.generate_private_key(public_exponent=65537, key_size=2048)
 _TEST_RSA_PUB = _TEST_RSA_KEY.public_key()
 
 
-def _make_apple_jwt(sub="apple-user-001", aud="co.enchant.Hematica", exp_offset=3600, kid="test-key-1"):
+def _make_apple_jwt(sub="apple-user-001", aud="co.enchant.Hematica", exp_offset=3600, kid="test-key-1", email="test@example.com"):
     """Create a JWT mimicking Apple's identityToken."""
     now = int(time.time())
     payload = {
@@ -732,7 +732,7 @@ def _make_apple_jwt(sub="apple-user-001", aud="co.enchant.Hematica", exp_offset=
         "exp": now + exp_offset,
         "iat": now,
         "sub": sub,
-        "email": "test@example.com",
+        "email": email,
         "email_verified": True,
     }
     return jwt.encode(payload, _TEST_RSA_KEY, algorithm="RS256", headers={"kid": kid})
@@ -825,20 +825,20 @@ class TestAppleAuth:
         resp = client.post("/api/v1/auth/apple", json={"identity_token": token})
         assert resp.status_code == 401
 
-    def test_apple_auth_link_existing_person(self, client, monkeypatch, db_path):
-        """Can link an Apple ID to an existing person by providing person_id."""
+    def test_apple_auth_link_by_name(self, client, monkeypatch, db_path):
+        """Can link an Apple ID to an existing person by name match."""
         self._mock_apple_jwks(monkeypatch)
 
         # Create person without apple_user_identifier
-        pid = client.post(
+        client.post(
             "/api/v1/persons", params=_auth(),
             json={"id": "paul-001", "name": "Paul"},
-        ).json()["id"]
+        )
 
         token = _make_apple_jwt(sub="apple-user-paul-link")
         resp = client.post("/api/v1/auth/apple", json={
             "identity_token": token,
-            "person_id": "paul-001",
+            "full_name": "Paul",
         })
         assert resp.status_code == 200
         assert resp.json()["person_id"] == "paul-001"
@@ -903,3 +903,166 @@ class TestAppleAuth:
             headers={"Authorization": f"Bearer {new_access}"},
         )
         assert new_resp.status_code == 200
+
+    # --- Identity reconciliation tests (Cases 1, 2, 3) ---
+
+    def test_case1_new_kasane_user_creates_with_client_uuid(self, client, monkeypatch, db_path):
+        """Case 1: New Kasane user not in Kiso. Server creates person using
+        the client-provided UUID (CoreData person ID) so both sides agree."""
+        self._mock_apple_jwks(monkeypatch)
+
+        client_uuid = "coredata-uuid-aaaa-1111"
+        token = _make_apple_jwt(sub="apple-new-user", email="jane@icloud.com")
+        resp = client.post("/api/v1/auth/apple", json={
+            "identity_token": token,
+            "person_id": client_uuid,
+            "full_name": "Jane Smith",
+            "email": "jane@icloud.com",
+        })
+        assert resp.status_code == 200
+        assert resp.json()["person_id"] == client_uuid
+
+        # Verify person created with client UUID, name, email, and apple_user_identifier
+        db = get_db(db_path)
+        row = db.execute(
+            "SELECT name, email, apple_user_identifier FROM person WHERE id = ?",
+            (client_uuid,),
+        ).fetchone()
+        assert row is not None, "Person should be created with client-provided UUID"
+        assert row["name"] == "Jane Smith"
+        assert row["email"] == "jane@icloud.com"
+        assert row["apple_user_identifier"] == "apple-new-user"
+
+    def test_case2_existing_kiso_user_matched_by_name(self, client, monkeypatch, db_path):
+        """Case 2: Existing Kiso/Milo user installs Kasane. Server matches
+        by name, links apple_user_identifier, stores email."""
+        self._mock_apple_jwks(monkeypatch)
+
+        # Pre-create a Kiso person (as if created by Milo onboarding)
+        db = get_db(db_path)
+        init_db()
+        from engine.gateway.v1_api import _now_iso
+        now = _now_iso()
+        db.execute(
+            "INSERT INTO person (id, name, health_engine_user_id, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            ("kiso-grigoriy-001", "Grigoriy Kogan", "grigoriy", now, now),
+        )
+        db.commit()
+
+        # SIWA with name that matches
+        token = _make_apple_jwt(sub="apple-grigoriy", email="grigoriy@gmail.com")
+        resp = client.post("/api/v1/auth/apple", json={
+            "identity_token": token,
+            "person_id": "coredata-uuid-cccc",  # iOS CoreData UUID (different)
+            "full_name": "Grigoriy Kogan",
+            "email": "grigoriy@gmail.com",
+        })
+        assert resp.status_code == 200
+        # Should return the EXISTING Kiso person ID, not the CoreData UUID
+        assert resp.json()["person_id"] == "kiso-grigoriy-001"
+
+        # Verify apple_user_identifier and email stored on existing person
+        row = db.execute(
+            "SELECT apple_user_identifier, email FROM person WHERE id = ?",
+            ("kiso-grigoriy-001",),
+        ).fetchone()
+        assert row["apple_user_identifier"] == "apple-grigoriy"
+        assert row["email"] == "grigoriy@gmail.com"
+
+        # Verify no new person was created with the CoreData UUID
+        orphan = db.execute(
+            "SELECT id FROM person WHERE id = ?", ("coredata-uuid-cccc",),
+        ).fetchone()
+        assert orphan is None, "Should NOT create a new person when name match found"
+
+    def test_case3_reinstall_matches_by_apple_id(self, client, monkeypatch, db_path):
+        """Case 3: Reinstall or new device. apple_user_identifier already set,
+        server returns existing person even if client sends a different UUID."""
+        self._mock_apple_jwks(monkeypatch)
+
+        # First auth: create person normally
+        token = _make_apple_jwt(sub="apple-reinstall-user", email="user@icloud.com")
+        resp1 = client.post("/api/v1/auth/apple", json={
+            "identity_token": token,
+            "person_id": "original-coredata-uuid",
+            "full_name": "Andrew Deal",
+            "email": "user@icloud.com",
+        })
+        assert resp1.status_code == 200
+        original_pid = resp1.json()["person_id"]
+
+        # Second auth from new device: different CoreData UUID, same Apple ID
+        resp2 = client.post("/api/v1/auth/apple", json={
+            "identity_token": token,
+            "person_id": "new-device-coredata-uuid",
+            "full_name": "Andrew Deal",
+            "email": "user@icloud.com",
+        })
+        assert resp2.status_code == 200
+        # Should return the ORIGINAL person, not create new
+        assert resp2.json()["person_id"] == original_pid
+
+    def test_case2_name_match_is_case_insensitive(self, client, monkeypatch, db_path):
+        """Name matching should be case-insensitive."""
+        self._mock_apple_jwks(monkeypatch)
+
+        db = get_db(db_path)
+        init_db()
+        from engine.gateway.v1_api import _now_iso
+        now = _now_iso()
+        db.execute(
+            "INSERT INTO person (id, name, health_engine_user_id, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            ("dean-001", "Dean", "dean", now, now),
+        )
+        db.commit()
+
+        # Apple sends full name with different casing
+        token = _make_apple_jwt(sub="apple-dean", email="dean@gmail.com")
+        resp = client.post("/api/v1/auth/apple", json={
+            "identity_token": token,
+            "person_id": "coredata-dean-uuid",
+            "full_name": "dean",
+            "email": "dean@gmail.com",
+        })
+        assert resp.status_code == 200
+        assert resp.json()["person_id"] == "dean-001"
+
+    def test_case2_duplicate_names_skips_to_create(self, client, monkeypatch, db_path):
+        """When multiple persons share a name, skip name match and create new
+        to avoid silently linking to the wrong person."""
+        self._mock_apple_jwks(monkeypatch)
+
+        db = get_db(db_path)
+        init_db()
+        from engine.gateway.v1_api import _now_iso
+        now = _now_iso()
+        db.execute(
+            "INSERT INTO person (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)",
+            ("paul-a", "Paul", now, now),
+        )
+        db.execute(
+            "INSERT INTO person (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)",
+            ("paul-b", "Paul", now, now),
+        )
+        db.commit()
+
+        token = _make_apple_jwt(sub="apple-paul", email="paul@gmail.com")
+        resp = client.post("/api/v1/auth/apple", json={
+            "identity_token": token,
+            "person_id": "coredata-paul-uuid",
+            "full_name": "Paul",
+            "email": "paul@gmail.com",
+        })
+        assert resp.status_code == 200
+        # Should NOT match either Paul — creates new with client UUID
+        assert resp.json()["person_id"] == "coredata-paul-uuid"
+
+        # Neither existing Paul should have been linked
+        db2 = get_db(db_path)
+        for pid in ("paul-a", "paul-b"):
+            row = db2.execute(
+                "SELECT apple_user_identifier FROM person WHERE id = ?", (pid,),
+            ).fetchone()
+            assert row["apple_user_identifier"] is None

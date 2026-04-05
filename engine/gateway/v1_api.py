@@ -799,7 +799,17 @@ def create_checkin(habit_id: str, body: CheckInCreate, request: Request, _token:
 async def auth_apple(request: Request):
     """Exchange an Apple identity token for an access/refresh token pair.
 
-    Body: {"identity_token": "<JWT>", "person_id": "<optional>"}
+    Identity reconciliation waterfall:
+    1. apple_user_identifier match (returning user / reinstall)
+    2. Name match against existing persons (existing Kiso user installs Kasane)
+    3. Create new person with client-provided UUID (new Kasane user)
+
+    Body: {
+        "identity_token": "<JWT>",
+        "person_id": "<optional CoreData UUID>",
+        "full_name": "<optional, from SIWA credential.fullName>",
+        "email": "<optional, from SIWA credential.email>"
+    }
     """
     body = await request.json()
 
@@ -811,10 +821,16 @@ async def auth_apple(request: Request):
     claims = _verify_apple_identity_token(identity_token)
     apple_sub = claims["sub"]
 
+    # Extract profile data from request body and JWT claims
+    full_name = body.get("full_name")
+    email = body.get("email") or claims.get("email")
+
     db = get_db()
     init_db()
+    now = _now_iso()
+    client_person_id = body.get("person_id")
 
-    # Look up existing person by apple_user_identifier
+    # --- Waterfall 1: match by apple_user_identifier (Case 3: reinstall) ---
     row = db.execute(
         "SELECT id FROM person WHERE apple_user_identifier = ? AND deleted_at IS NULL",
         (apple_sub,),
@@ -822,31 +838,47 @@ async def auth_apple(request: Request):
 
     if row:
         person_id = row["id"]
-    else:
-        # Check if linking to an existing person
-        link_person_id = body.get("person_id")
-        if link_person_id:
-            existing = db.execute(
-                "SELECT id FROM person WHERE id = ? AND deleted_at IS NULL",
-                (link_person_id,),
-            ).fetchone()
-            if not existing:
-                raise HTTPException(404, f"Person {link_person_id} not found")
+        # Update email if we got one and don't have it yet
+        if email:
             db.execute(
-                "UPDATE person SET apple_user_identifier = ?, updated_at = ? WHERE id = ?",
-                (apple_sub, _now_iso(), link_person_id),
+                "UPDATE person SET email = COALESCE(email, ?), updated_at = ? WHERE id = ?",
+                (email, now, person_id),
             )
             db.commit()
-            person_id = link_person_id
-        else:
-            # Create new person
-            person_id = _new_id()
-            now = _now_iso()
-            name = claims.get("email", "").split("@")[0] or "User"
+    else:
+        # --- Waterfall 2: match by name (Case 2: existing Kiso user) ---
+        matched_row = None
+        if full_name:
+            matches = db.execute(
+                "SELECT id FROM person WHERE name = ? COLLATE NOCASE "
+                "AND apple_user_identifier IS NULL AND deleted_at IS NULL",
+                (full_name,),
+            ).fetchall()
+            if len(matches) == 1:
+                matched_row = matches[0]
+            elif len(matches) > 1:
+                logger.warning(
+                    "Apple auth: %d persons match name=%s, skipping name match",
+                    len(matches), full_name,
+                )
+
+        if matched_row:
+            person_id = matched_row["id"]
             db.execute(
-                "INSERT INTO person (id, name, apple_user_identifier, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (person_id, name, apple_sub, now, now),
+                "UPDATE person SET apple_user_identifier = ?, "
+                "email = COALESCE(email, ?), updated_at = ? WHERE id = ?",
+                (apple_sub, email, now, person_id),
+            )
+            db.commit()
+            logger.info("Apple auth: matched existing person by name=%s", full_name)
+        else:
+            # --- Waterfall 3: create new person (Case 1: new Kasane user) ---
+            person_id = client_person_id or _new_id()
+            name = full_name or claims.get("email", "").split("@")[0] or "User"
+            db.execute(
+                "INSERT INTO person (id, name, email, apple_user_identifier, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (person_id, name, email, apple_sub, now, now),
             )
             db.commit()
 
