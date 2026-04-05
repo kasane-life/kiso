@@ -2343,8 +2343,10 @@ def _log_labs(
     data["latest"] = latest
     data["last_updated"] = datetime.now().strftime("%Y-%m-%d")
 
-    with open(lab_path, "w") as f:
+    tmp_path = lab_path.with_suffix(".json.tmp")
+    with open(tmp_path, "w") as f:
         json.dump(data, f, indent=2)
+    os.replace(tmp_path, lab_path)
 
     # SQLite write (lab_draw + lab_result)
     import uuid as _uuid

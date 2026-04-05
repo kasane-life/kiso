@@ -196,3 +196,55 @@ def test_source_defaults_to_unknown(tools, tmp_data):
 def test_empty_results(tools, tmp_data):
     result = tools["log_labs"](results={})
     assert result["logged"] is False
+
+
+# --- Atomic write safety ---
+
+def test_log_labs_atomic_write_no_partial_file(tools, tmp_data):
+    """If json.dump crashes mid-write, the original file should be intact."""
+    import mcp_server.tools as mod
+
+    # Write initial data
+    tools["log_labs"](results={"apob": 72}, date="2025-01-01", source="Quest")
+    lab_path = tmp_data / "lab_results.json"
+    original_content = lab_path.read_text()
+
+    # Monkey-patch json.dump to crash partway through
+    real_dump = json.dump
+
+    def crashing_dump(obj, fp, **kwargs):
+        fp.write('{"draws": [')  # partial write
+        raise OSError("disk full")
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(json, "dump", crashing_dump)
+    try:
+        with pytest.raises(OSError):
+            tools["log_labs"](results={"ldl_c": 90}, date="2025-06-01")
+    finally:
+        monkeypatch.undo()
+
+    # Original file should still be valid JSON with original data
+    recovered = json.loads(lab_path.read_text())
+    assert recovered["latest"]["apob"] == 72
+
+    # Next successful write should work (no leftover .tmp corruption)
+    result = tools["log_labs"](results={"ldl_c": 90}, date="2025-06-01")
+    assert result["logged"] is True
+    final = json.loads(lab_path.read_text())
+    assert final["latest"]["ldl_c"] == 90
+    assert final["latest"]["apob"] == 72
+
+
+def test_log_labs_file_valid_json_after_write(tools, tmp_data):
+    """After log_labs, the file must always be valid JSON."""
+    tools["log_labs"](results={"apob": 72}, date="2025-01-01")
+    tools["log_labs"](results={"ldl_c": 90}, date="2025-06-01")
+    tools["log_labs"](results={"hba1c": 5.3}, date="2025-09-01")
+
+    lab_path = tmp_data / "lab_results.json"
+    data = json.loads(lab_path.read_text())
+    assert len(data["draws"]) == 3
+    assert data["latest"]["apob"] == 72
+    assert data["latest"]["ldl_c"] == 90
+    assert data["latest"]["hba1c"] == 5.3
