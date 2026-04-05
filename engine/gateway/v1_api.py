@@ -36,7 +36,7 @@ logger = logging.getLogger("kiso.v1_api")
 
 APPLE_JWKS_URL = "https://appleid.apple.com/auth/keys"
 APPLE_ISSUER = "https://appleid.apple.com"
-APPLE_AUDIENCE = "co.enchant.Hematica"
+APPLE_AUDIENCE = ["co.enchant.Hematica", "com.adeal.Habica.Kasane"]
 _apple_jwks_cache: dict | None = None
 _apple_jwks_cache_time: float = 0
 _JWKS_CACHE_TTL = 3600  # 1 hour
