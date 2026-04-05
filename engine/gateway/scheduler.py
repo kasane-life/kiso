@@ -495,10 +495,11 @@ def _run_schedule(schedule_type: str, target_hour: int, require_friday: bool = F
         # Gather health context
         context_data = _gather_context(schedule_type, user_id)
 
-        # Pre-compose gate: skip Sonnet for zero-data users
+        # Skip users with no health data entirely — don't spam onboarding templates
         if not has_composable_data(context_data):
-            message = _ONBOARDING_MESSAGE.format(name=name)
-            logger.info("Zero-data user %s: sending onboarding message (skipping Sonnet)", user_id)
+            logger.info("Skipping zero-data user %s: no data to coach on", user_id)
+            results.append({"user_id": user_id, "status": "skip", "reason": "no data"})
+            continue
         else:
             # Look up anchor habit for prompt construction
             anchor_habit = None

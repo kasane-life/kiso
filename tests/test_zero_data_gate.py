@@ -117,8 +117,8 @@ class TestZeroDataSchedulerIntegration:
     @patch("engine.gateway.scheduler._user_local_now")
     @patch("engine.gateway.scheduler._get_eligible_persons")
     @patch("engine.gateway.scheduler._audit_scheduler")
-    def test_skips_sonnet_for_zero_data(self, mock_audit, mock_persons, mock_now, mock_compose, mock_context, db_with_mike):
-        """Zero-data user should get hardcoded message, not Sonnet-composed."""
+    def test_skips_zero_data_users_entirely(self, mock_audit, mock_persons, mock_now, mock_compose, mock_context, db_with_mike):
+        """Zero-data user should be skipped entirely, no message sent."""
         mock_persons.return_value = [
             {"id": "mike-001", "name": "Mike", "health_engine_user_id": "mike",
              "channel": "whatsapp", "channel_target": "+14155551234", "timezone": "America/Los_Angeles"},
@@ -136,9 +136,9 @@ class TestZeroDataSchedulerIntegration:
         # Sonnet should NOT have been called
         mock_compose.assert_not_called()
 
-        msg = result["results"][0]["message"]
-        assert "connect" in msg.lower() or "garmin" in msg.lower()
-        assert result["results"][0]["status"] == "dry_run"
+        # User should be skipped, not sent anything
+        assert result["results"][0]["status"] == "skip"
+        assert "no data" in result["results"][0]["reason"]
 
     @patch("engine.gateway.scheduler._gather_context")
     @patch("engine.gateway.scheduler._compose_message", return_value="HRV is 52, sleep was 7.1 hours.")

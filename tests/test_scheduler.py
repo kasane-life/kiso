@@ -527,6 +527,23 @@ class TestConversationIngestion:
         row = db_with_andrew.execute("SELECT COUNT(*) FROM conversation_message").fetchone()
         assert row[0] == 0, "Failed send should not write to conversation_message"
 
+    @patch("engine.gateway.scheduler._gather_context", return_value={"checkin": {"data_available": {}, "score": {"coverage": 0}}})
+    @patch("engine.gateway.scheduler._user_local_now")
+    @patch("engine.gateway.scheduler._get_eligible_persons")
+    @patch("engine.gateway.scheduler._audit_scheduler")
+    def test_skips_zero_data_users(self, mock_audit, mock_persons, mock_now, mock_context, db_with_andrew):
+        """Users with no health data should be skipped entirely, not sent onboarding template."""
+        mock_persons.return_value = [
+            {"id": "andrew-001", "name": "Andrew", "health_engine_user_id": "andrew",
+             "channel": "whatsapp", "channel_target": "+14152009584", "timezone": "America/Los_Angeles"},
+        ]
+        mock_now.return_value = datetime(2026, 4, 2, 7, 10, tzinfo=ZoneInfo("America/Los_Angeles"))
+
+        result = _run_schedule("morning_brief", target_hour=7, dry_run=True)
+
+        assert result["results"][0]["status"] == "skip"
+        assert "no data" in result["results"][0]["reason"]
+
 
 # --- Conversation message dedup tests ---
 
