@@ -2923,29 +2923,25 @@ def _ingest_health_snapshot(
         except (ValueError, TypeError):
             pass
 
-    # Dedup check: skip if same-day entry already exists
+    # Dedup check: skip if values haven't changed since last entry
     data_dir = _data_dir(user_id)
     daily_path_check = data_dir / "apple_health_daily.json"
-    today_date = datetime.now().strftime("%Y-%m-%d")
     if daily_path_check.exists():
         try:
             existing = json.load(open(daily_path_check))
-            if isinstance(existing, list):
-                today_entries = [e for e in existing if e.get("timestamp", "")[:10] == today_date]
-                if today_entries:
-                    # Already have data for today. Check if it's been less than 6 hours.
-                    last_ts = today_entries[-1].get("timestamp", "")
-                    try:
-                        last_dt = datetime.fromisoformat(last_ts.replace("Z", "+00:00"))
-                        hours_since = (datetime.now().astimezone() - last_dt).total_seconds() / 3600
-                        if hours_since < 6:
-                            return {
-                                "ingested": False,
-                                "error": f"Already have data from {hours_since:.1f} hours ago today. Skipping duplicate.",
-                                "last_entry": last_ts,
-                            }
-                    except (ValueError, TypeError):
-                        pass
+            if isinstance(existing, list) and existing:
+                last_entry = existing[-1]
+                # Compare metric values (ignore timestamp)
+                values_same = all(
+                    last_entry.get(k) == v for k, v in clean.items()
+                    if k not in ("timestamp",)
+                )
+                if values_same:
+                    return {
+                        "ingested": False,
+                        "error": "Metrics unchanged since last sync. Skipping.",
+                        "last_entry": last_entry.get("timestamp", ""),
+                    }
         except (json.JSONDecodeError, IOError):
             pass
 
