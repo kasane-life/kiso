@@ -20,9 +20,10 @@ bind = f"0.0.0.0:{os.environ.get('KISO_PORT', '18800')}"
 # Uvicorn workers for async FastAPI
 worker_class = "uvicorn.workers.UvicornWorker"
 
-# 2 workers: enough for our traffic, allows graceful HUP reload
-# (new workers start before old ones drain)
-workers = 2
+# 1 worker: MCP sessions are in-memory per worker, so multiple workers
+# cause 404s when requests round-robin to the wrong one. Our traffic
+# (5 users) doesn't need concurrency. Blue-green handles zero-downtime.
+workers = 1
 
 # Seconds to wait for in-flight requests before force-killing old workers
 graceful_timeout = 10
