@@ -49,6 +49,16 @@ fi
 if [ -n "$FAILURES" ]; then
     MSG="GATEWAY ALERT $(date +%H:%M):$(echo -e "$FAILURES")"
     echo "$MSG"
+
+    # Dedup: only send one alert per unique failure set per day.
+    # Data stays in the state file for debugging; repeated alerts are suppressed.
+    STATE_FILE="/tmp/healthcheck_last_alert_$(date +%Y%m%d)"
+    if [ -f "$STATE_FILE" ] && [ "$(cat "$STATE_FILE")" = "$FAILURES" ]; then
+        echo "duplicate alert suppressed $(date)"
+        exit 1
+    fi
+    echo "$FAILURES" > "$STATE_FILE"
+
     # Alert via WhatsApp
     export PATH="/opt/homebrew/bin:$HOME/Library/pnpm:$PATH"
     openclaw agent --to +14152009584 --channel whatsapp --message "$MSG" 2>/dev/null

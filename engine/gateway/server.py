@@ -555,7 +555,24 @@ def create_app(config: GatewayConfig | None = None) -> "FastAPI":
         except Exception as e:
             checks["stuck_users"] = {"status": "error", "error": str(e)[:100]}
 
-        # 10. Disk space
+        # 10. Duplicate person records (same health_engine_user_id, both active)
+        try:
+            from .db import get_db as _get_db5
+            _dpdb = _get_db5()
+            _dupes = _dpdb.execute(
+                "SELECT health_engine_user_id, COUNT(*) as cnt "
+                "FROM person WHERE deleted_at IS NULL AND health_engine_user_id IS NOT NULL "
+                "GROUP BY health_engine_user_id HAVING cnt > 1"
+            ).fetchall()
+            if _dupes:
+                dupe_report = {d["health_engine_user_id"]: d["cnt"] for d in _dupes}
+                checks["duplicate_persons"] = {"status": "warning", "duplicates": dupe_report}
+            else:
+                checks["duplicate_persons"] = {"status": "ok"}
+        except Exception as e:
+            checks["duplicate_persons"] = {"status": "error", "error": str(e)[:100]}
+
+        # 11. Disk space
         import shutil
         usage = shutil.disk_usage(str(Path.home()))
         pct_used = round(100 * (usage.used / usage.total), 1)
