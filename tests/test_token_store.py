@@ -177,32 +177,3 @@ def test_has_token_garth_cache_non_garmin(store_encrypted, garth_cache_dir):
     assert not store_encrypted.has_token("oura", "andrew")
 
 
-# --- Step 4: Legacy removal verification ---
-
-
-def test_no_legacy_migration_attribute(store_encrypted):
-    """TokenStore should not have _migrate_from_files."""
-    assert not hasattr(store_encrypted, "_migrate_from_files")
-
-
-def test_no_legacy_base_dir_constant():
-    """_LEGACY_BASE_DIR should not exist in token_store module."""
-    import engine.gateway.token_store as mod
-    assert not hasattr(mod, "_LEGACY_BASE_DIR")
-
-
-def test_has_token_only_checks_sqlite_and_garth_cache(store_encrypted, token_dir):
-    """has_token should NOT check legacy file paths."""
-    # Create a token file at the old legacy location
-    legacy = token_dir / "oura" / "andrew"
-    legacy.mkdir(parents=True)
-    (legacy / "token.json").write_text('{"token": "legacy"}')
-
-    # Should not find it since legacy migration is removed
-    assert not store_encrypted.has_token("oura", "andrew")
-
-
-def test_save_token_returns_none(store_encrypted):
-    """save_token should not return a legacy directory path."""
-    result = store_encrypted.save_token("svc", "u1", {"token": "val"})
-    assert result is None

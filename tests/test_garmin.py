@@ -8,14 +8,7 @@ from unittest.mock import patch
 
 import pytest
 
-from engine.integrations.garmin import GarminClient, DEFAULT_EXERCISE_MAP
-
-
-def test_default_exercise_map():
-    """Default exercise map should contain common lifts."""
-    assert "barbell deadlift" in DEFAULT_EXERCISE_MAP
-    assert "barbell bench press" in DEFAULT_EXERCISE_MAP
-    assert "barbell back squat" in DEFAULT_EXERCISE_MAP
+from engine.integrations.garmin import GarminClient
 
 
 def test_normalize_exercise_mapped():

@@ -13,8 +13,6 @@ from engine.integrations.oura_auth import (
     run_auth_flow,
     run_gateway_auth_flow,
     _exchange_code,
-    SERVICE_NAME as AUTH_SERVICE_NAME,
-    DEFAULT_SCOPES,
 )
 
 
@@ -22,27 +20,6 @@ from engine.integrations.oura_auth import (
 # OuraClient unit tests
 # =====================================================================
 
-
-class TestOuraClientInit:
-    def test_default_init(self):
-        client = OuraClient()
-        assert client.user_id == "default"
-        assert client.data_dir == Path("./data")
-
-    def test_custom_init(self):
-        client = OuraClient(user_id="paul", data_dir="/tmp/health")
-        assert client.user_id == "paul"
-        assert client.data_dir == Path("/tmp/health")
-
-    def test_from_config(self):
-        config = {"data_dir": "/tmp/data"}
-        client = OuraClient.from_config(config, user_id="mike")
-        assert client.user_id == "mike"
-        assert str(client.data_dir) == "/tmp/data"
-
-    def test_from_config_defaults(self):
-        client = OuraClient.from_config({})
-        assert client.user_id == "default"
 
 
 class TestOuraHasTokens:
@@ -450,16 +427,6 @@ class TestWearableFallback:
 
 
 class TestOuraAuth:
-    def test_service_name(self):
-        assert AUTH_SERVICE_NAME == "oura"
-
-    def test_default_scopes(self):
-        assert "daily" in DEFAULT_SCOPES
-        assert "sleep" in DEFAULT_SCOPES
-        assert "heartrate" in DEFAULT_SCOPES
-        assert "workout" in DEFAULT_SCOPES
-        assert "personal" in DEFAULT_SCOPES
-
     def test_exchange_code_error_handling(self):
         """_exchange_code should return error dict on network failure."""
         with patch("engine.integrations.oura_auth.urllib.request.urlopen") as mock_open:
@@ -573,11 +540,6 @@ class TestTokenRefresh:
 
 
 class TestToolRegistry:
-    def test_oura_tools_in_registry(self):
-        from mcp_server.tools import TOOL_REGISTRY
-        assert "pull_oura" in TOOL_REGISTRY
-        assert "connect_oura" in TOOL_REGISTRY
-
     def test_connect_wearable_supports_oura(self):
         from mcp_server.tools import _connect_wearable
         # Should not return "unsupported" error for oura

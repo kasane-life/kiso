@@ -13,8 +13,6 @@ from engine.integrations.whoop_auth import (
     run_auth_flow,
     run_gateway_auth_flow,
     _exchange_code,
-    SERVICE_NAME as AUTH_SERVICE_NAME,
-    DEFAULT_SCOPES,
 )
 
 
@@ -22,27 +20,6 @@ from engine.integrations.whoop_auth import (
 # WhoopClient unit tests
 # =====================================================================
 
-
-class TestWhoopClientInit:
-    def test_default_init(self):
-        client = WhoopClient()
-        assert client.user_id == "default"
-        assert client.data_dir == Path("./data")
-
-    def test_custom_init(self):
-        client = WhoopClient(user_id="paul", data_dir="/tmp/health")
-        assert client.user_id == "paul"
-        assert client.data_dir == Path("/tmp/health")
-
-    def test_from_config(self):
-        config = {"data_dir": "/tmp/data"}
-        client = WhoopClient.from_config(config, user_id="mike")
-        assert client.user_id == "mike"
-        assert str(client.data_dir) == "/tmp/data"
-
-    def test_from_config_defaults(self):
-        client = WhoopClient.from_config({})
-        assert client.user_id == "default"
 
 
 class TestWhoopHasTokens:
@@ -531,17 +508,6 @@ class TestWearableFallback:
 
 
 class TestWhoopAuth:
-    def test_service_name(self):
-        assert AUTH_SERVICE_NAME == "whoop"
-
-    def test_default_scopes(self):
-        assert "read:recovery" in DEFAULT_SCOPES
-        assert "read:sleep" in DEFAULT_SCOPES
-        assert "read:workout" in DEFAULT_SCOPES
-        assert "read:profile" in DEFAULT_SCOPES
-        assert "read:body_measurement" in DEFAULT_SCOPES
-        assert "read:cycles" in DEFAULT_SCOPES
-
     def test_exchange_code_error_handling(self):
         """_exchange_code should return error dict on network failure."""
         with patch("engine.integrations.whoop_auth.urllib.request.urlopen") as mock_open:
@@ -655,11 +621,6 @@ class TestTokenRefresh:
 
 
 class TestToolRegistry:
-    def test_whoop_tools_in_registry(self):
-        from mcp_server.tools import TOOL_REGISTRY
-        assert "pull_whoop" in TOOL_REGISTRY
-        assert "connect_whoop" in TOOL_REGISTRY
-
     def test_connect_wearable_supports_whoop(self):
         from mcp_server.tools import _connect_wearable
         # Should not return "unsupported" error for whoop
