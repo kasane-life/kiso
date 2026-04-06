@@ -84,8 +84,12 @@ Track what's been nudged to avoid repetition:
 - Positive streaks: celebrate at 7, 14, 21 days — not every day
 - Data freshness nudges: once per week max per metric
 
-## Quiet Hours
+## Quiet Hours (HARD RULE)
 
-No messages between 9:15 PM and 6:00 AM **in the user's local timezone**. Check `user.timezone` from users.yaml before sending any message.
+**ZERO messages between 9:15 PM and 6:00 AM in the user's local timezone.** No exceptions. No "just this one alert." No system health checks. No evening wind-downs at 3 AM.
 
-If a critical signal fires during a user's quiet hours, queue it for their next morning brief with a flag: "Overnight alert: [signal]. Flagging this first thing."
+Before ANY message send, check: what time is it for THIS user? If it is between 9:15 PM and 6:00 AM in their timezone, DO NOT SEND. Period.
+
+If a critical signal fires during quiet hours, do nothing. The morning brief will catch it. Waking someone up with a health alert defeats the purpose of health coaching.
+
+System health check cron output during quiet hours: silently discard. Do not forward to any user at any time. Health checks are admin data, not user data.
