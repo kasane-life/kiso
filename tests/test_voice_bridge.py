@@ -412,7 +412,7 @@ class TestGetConversationsVoiceFiltering:
 
         with patch("engine.gateway.db.get_db", return_value=db):
             from mcp_server.tools import _get_conversations
-            result = _get_conversations("andrew", days=7)
+            result = _get_conversations("andrew", hours=168)
 
         messages = result["conversations"]["andrew"]
         contents = [m["content"] for m in messages]

@@ -61,7 +61,7 @@ class TestHeartbeatFiltering:
     """HEARTBEAT_OK and NO_REPLY cron status codes must not appear in results."""
 
     def test_filters_heartbeat_ok_for_specific_user(self, conv_db):
-        result = _get_conversations(user_id="andrew", days=1)
+        result = _get_conversations(user_id="andrew", hours=24)
         contents = [m["content"] for m in result["conversations"]["andrew"]]
 
         assert "how am I doing?" in contents
@@ -70,7 +70,7 @@ class TestHeartbeatFiltering:
         assert "NO_REPLY" not in contents
 
     def test_filters_heartbeat_ok_all_users(self, conv_db):
-        result = _get_conversations(days=1)
+        result = _get_conversations(hours=24)
         all_contents = []
         for user_msgs in result["conversations"].values():
             all_contents.extend(m["content"] for m in user_msgs)
@@ -82,7 +82,27 @@ class TestHeartbeatFiltering:
         assert "logged 3 eggs" in all_contents
 
     def test_message_count_excludes_cron_noise(self, conv_db):
-        result = _get_conversations(days=1)
+        result = _get_conversations(hours=24)
         # 6 total rows, 3 are cron noise → 3 real messages expected
         # andrew: 2 real (user + assistant), paul: 1 real (user)
+        assert result["total_messages"] == 3
+
+
+class TestAllUsersQuery:
+    """None user_id must return conversations for ALL users, not just the authenticated one."""
+
+    def test_none_user_id_returns_all_users(self, conv_db):
+        result = _get_conversations(user_id=None, hours=24)
+        assert "andrew" in result["users"]
+        assert "paul" in result["users"]
+        assert len(result["users"]) == 2
+
+    def test_specific_user_id_filters(self, conv_db):
+        result = _get_conversations(user_id="paul", hours=24)
+        assert result["users"] == ["paul"]
+        assert result["total_messages"] == 1
+
+    def test_hours_window_returns_recent(self, conv_db):
+        # All test data is "now", so hours=1 should return everything
+        result = _get_conversations(hours=1)
         assert result["total_messages"] == 3

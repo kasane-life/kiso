@@ -3573,7 +3573,7 @@ def _ingest_message(
 
 def _get_conversations(
     user_id: str | None = None,
-    days: int = 7,
+    hours: int = 168,
 ) -> dict:
     """Get recent conversation messages, optionally filtered by user."""
     from engine.gateway.db import get_db
@@ -3595,7 +3595,7 @@ def _get_conversations(
                {voice_filter}
                {cron_filter}
                ORDER BY timestamp""",
-            (user_id, f"-{days} days"),
+            (user_id, f"-{hours} hours"),
         ).fetchall()
     else:
         rows = conn.execute(
@@ -3606,7 +3606,7 @@ def _get_conversations(
                {voice_filter}
                {cron_filter}
                ORDER BY user_id, timestamp""",
-            (f"-{days} days",),
+            (f"-{hours} hours",),
         ).fetchall()
 
     messages = [dict(r) for r in rows]
@@ -4240,9 +4240,11 @@ def register_tools(mcp: FastMCP):
         return _save_coaching_message(person_id, message_text, habit_id, message_type, user_id)
 
     @mcp.tool()
-    def get_conversations(user_id: str | None = None, days: int = 7) -> dict:
-        """Get recent conversation history for a user. Returns all messages (user + assistant) from the last N days. Call this at the start of a session to understand what you have already discussed with this user. If user_id is omitted, returns conversations for all users."""
-        return _get_conversations(_effective_user_id(user_id), days)
+    def get_conversations(user_id: str | None = None, hours: int = 168) -> dict:
+        """Get recent conversation history for a user. Returns all messages (user + assistant) from the last N hours (default 168 = 7 days). Call this at the start of a session to understand what you have already discussed with this user. If user_id is omitted, returns conversations for all users."""
+        # Don't resolve None → authenticated user here; None means "all users"
+        uid = _effective_user_id(user_id) if user_id else None
+        return _get_conversations(uid, hours)
 
     @mcp.tool()
     def record_hypothesis(hypothesis: str, metric_key: str, user_id: str | None = None) -> dict:
