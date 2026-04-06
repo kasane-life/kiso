@@ -25,6 +25,19 @@ from engine.utils.csv_io import read_csv, write_csv, append_csv
 from engine.db_read import get_weights, get_bp, get_meals, get_habits, get_labs, get_strength, get_wearable_daily, authenticated_user_id
 
 
+def _atomic_json_write(path: Path, data, **kwargs):
+    """Write JSON atomically via tmp file + os.replace.
+
+    Prevents file corruption when concurrent processes (iOS sync, cron,
+    pull_garmin) write to the same file. kwargs are passed to json.dump.
+    """
+    path = Path(path)
+    tmp = path.with_suffix(".json.tmp")
+    with open(tmp, "w") as f:
+        json.dump(data, f, **kwargs)
+    os.replace(tmp, path)
+
+
 def _effective_user_id(user_id: str | None) -> str | None:
     """Resolve user_id: explicit param > contextvar > None.
 
@@ -1627,8 +1640,7 @@ def _pull_garmin(history: bool = False, workouts: bool = False, user_id: str | N
         from engine.coaching.briefing import build_briefing
         briefing = build_briefing(config)
         data_dir = Path(config.get("data_dir", "./data"))
-        with open(data_dir / "briefing.json", "w") as f:
-            json.dump(briefing, f, indent=2, default=str)
+        _atomic_json_write(data_dir / "briefing.json", briefing, indent=2, default=str)
 
         return {
             "pulled": True,
@@ -1724,8 +1736,7 @@ def _pull_oura(history: bool = False, user_id: str | None = None) -> dict:
         briefing = build_briefing(config)
         briefing_dir = Path(data_dir_path)
         briefing_dir.mkdir(parents=True, exist_ok=True)
-        with open(briefing_dir / "briefing.json", "w") as f:
-            json.dump(briefing, f, indent=2, default=str)
+        _atomic_json_write(briefing_dir / "briefing.json", briefing, indent=2, default=str)
 
         return {
             "pulled": True,
@@ -1824,8 +1835,7 @@ def _pull_whoop(history: bool = False, user_id: str | None = None) -> dict:
         briefing = build_briefing(config)
         briefing_dir = Path(data_dir_path)
         briefing_dir.mkdir(parents=True, exist_ok=True)
-        with open(briefing_dir / "briefing.json", "w") as f:
-            json.dump(briefing, f, indent=2, default=str)
+        _atomic_json_write(briefing_dir / "briefing.json", briefing, indent=2, default=str)
 
         return {
             "pulled": True,
@@ -2027,8 +2037,7 @@ def _open_dashboard(user_id: str | None = None) -> dict:
     data_dir = _data_dir(user_id)
     data_dir.mkdir(parents=True, exist_ok=True)
     briefing_path = data_dir / "briefing.json"
-    with open(briefing_path, "w") as f:
-        json.dump(briefing, f, indent=2)
+    _atomic_json_write(briefing_path, briefing, indent=2)
 
     dashboard_path = PROJECT_ROOT / "dashboard" / "index.html"
     if not dashboard_path.exists():
@@ -2220,8 +2229,7 @@ def _setup_profile(
         briefing_config["data_dir"] = str(data_dir)
         from engine.coaching.briefing import build_briefing
         briefing = build_briefing(briefing_config)
-        with open(data_dir / "briefing.json", "w") as f:
-            json.dump(briefing, f, indent=2, default=str)
+        _atomic_json_write(data_dir / "briefing.json", briefing, indent=2, default=str)
         briefing_refreshed = True
     except Exception:
         pass
@@ -2261,8 +2269,7 @@ def _check_engagement(user_id: str | None = None) -> dict:
 
     if has_data:
         state["responded"] = True
-        with open(nudge_path, "w") as f:
-            json.dump(state, f, indent=2)
+        _atomic_json_write(nudge_path, state, indent=2)
         return {"status": "engaged", "user_id": user_id, "state": state}
 
     if state.get("dormant"):
@@ -2281,8 +2288,7 @@ def _check_engagement(user_id: str | None = None) -> dict:
         action = "send_day7_nudge"
     elif days_since > 7:
         state["dormant"] = True
-        with open(nudge_path, "w") as f:
-            json.dump(state, f, indent=2)
+        _atomic_json_write(nudge_path, state, indent=2)
         action = "none"
     else:
         action = "wait"
@@ -2337,8 +2343,7 @@ def _log_nudge(user_id: str, nudge_type: str) -> dict:
         state.setdefault("nudges_sent", []).append(nudge_type)
         state[f"{nudge_type}_sent_at"] = datetime.now().strftime("%Y-%m-%d %H:%M")
 
-    with open(nudge_path, "w") as f:
-        json.dump(state, f, indent=2)
+    _atomic_json_write(nudge_path, state, indent=2)
 
     return {"ok": True, "user_id": user_id, "state": state}
 
@@ -2414,10 +2419,7 @@ def _log_labs(
     data["latest"] = latest
     data["last_updated"] = datetime.now().strftime("%Y-%m-%d")
 
-    tmp_path = lab_path.with_suffix(".json.tmp")
-    with open(tmp_path, "w") as f:
-        json.dump(data, f, indent=2)
-    os.replace(tmp_path, lab_path)
+    _atomic_json_write(lab_path, data, indent=2)
 
     # SQLite write (lab_draw + lab_result)
     import uuid as _uuid
@@ -2452,8 +2454,7 @@ def _log_labs(
         _cfg["data_dir"] = str(data_dir)
         from engine.coaching.briefing import build_briefing
         briefing = build_briefing(_cfg)
-        with open(data_dir / "briefing.json", "w") as f:
-            json.dump(briefing, f, indent=2, default=str)
+        _atomic_json_write(data_dir / "briefing.json", briefing, indent=2, default=str)
         briefing_refreshed = True
     except Exception:
         pass
@@ -3016,8 +3017,7 @@ def _ingest_health_snapshot(
 
     series.append(entry)
 
-    with open(daily_path, "w") as f:
-        json.dump(series, f, indent=2)
+    _atomic_json_write(daily_path, series, indent=2)
 
     # --- Update latest.json with rolling averages ---
     # Use up to last 7 entries for averages (like garmin_latest.json)
@@ -3068,8 +3068,7 @@ def _ingest_health_snapshot(
     if _latest_val("active_calories") is not None:
         latest["active_calories"] = _rolling_avg("active_calories")
 
-    with open(latest_path, "w") as f:
-        json.dump(latest, f, indent=2)
+    _atomic_json_write(latest_path, latest, indent=2)
 
     # --- Also log weight if provided ---
     weight_logged = False
@@ -3136,8 +3135,7 @@ def _ingest_health_snapshot(
         _cfg["data_dir"] = str(data_dir)
         from engine.coaching.briefing import build_briefing
         briefing = build_briefing(_cfg)
-        with open(data_dir / "briefing.json", "w") as f:
-            json.dump(briefing, f, indent=2, default=str)
+        _atomic_json_write(data_dir / "briefing.json", briefing, indent=2, default=str)
         briefing_refreshed = True
     except Exception:
         pass
@@ -3339,8 +3337,7 @@ def _log_coach_task(
     }
     existing.append(task)
 
-    with open(tasks_path, "w") as f:
-        json.dump(existing, f, indent=2)
+    _atomic_json_write(tasks_path, existing, indent=2)
 
     return {"created": True, "task_id": task["id"], "type": task_type, "priority": priority}
 
@@ -3371,8 +3368,7 @@ def _complete_coach_task(task_id: str) -> dict:
         if t.get("id") == task_id:
             t["status"] = "completed"
             t["completed_at"] = datetime.now().isoformat()
-            with open(tasks_path, "w") as f:
-                json.dump(tasks, f, indent=2)
+            _atomic_json_write(tasks_path, tasks, indent=2)
             return {"completed": True, "task_id": task_id}
 
     return {"error": f"Task {task_id} not found"}
